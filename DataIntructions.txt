@@ -1,0 +1,50 @@
+# How to query data from DART needed to run LGD escapement model
+
+The DART webpage: http://www.cbr.washington.edu/dart
+
+## Window Counts
+Go to this query page: http://www.cbr.washington.edu/dart/query/pit_adult_window
+	- select year
+	- select project: LWG-Lower Granite
+	- select span calendar years
+Submit query
+Download csv
+	- called something like: adultdaily_1444247382_835.csv
+Save in folder: WindowCounts
+
+## Trap sample rates
+Go to this query page: http://www.cbr.washington.edu/dart/query/pitadult_valid
+	- select query type: Sample Time/Rates
+	- select year
+	- select species: 3 - Wild Steelhead
+Submit query
+Download csv
+	- called something like: pit_adult_valid_2009_3.csv
+Save in folder: TrapSampleRates
+
+## Details of tagged fish crossing LGR - for night passage and re-ascension
+Go to this query page: http://www.cbr.washington.edu/dart/query/pit_adult_window
+	- select query type: Detection Details by TagID
+	- select year
+	- select species
+	- select date range: 
+		7/1 - 6/30 for steelhead
+		3/1 - 8/17 for Chinook
+Submit query
+Download Detail csv
+	- called something like: pitadultwindow_upper_tagid_GRA_2009_3_no_1_2009_365_2009.csv	
+Save in folder: TagDetails
+
+#-----------------------------------------------------------------------------
+## Details of previously tagged fish crossing LGR - NOT CURRENTLY USED
+Go to this query page: http://www.cbr.washington.edu/dart/query/pitadult_obsyr_detail
+	- select year
+	- select observation location: Lower Granite Dam Adult Fishway (GRA)
+	- select species
+	- select run: Chinook - Spring, Steelhead - All
+	- select rear type: W + H - Wild + Hatchery
+	- select date range: 
+		7/1 - 6/30 for steelhead
+		3/1 - 8/17 for Chinook
+	- Options: no restrictions on release location
+Submit query
