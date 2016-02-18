@@ -145,7 +145,7 @@ ggplot(lgr_night_reasc_weekly, aes(x = reascent_tags / tot_tags, y = reascent_ta
 # pull trap data directly from IDFG trap database
 pbt.db.date = '20151018'
 
-lgr_trap = read.csv(paste0('Data/IDFG_TrapDatabase/tblLGDMasterCombineExportJodyW_', pbt.db.date, '.csv')) %>% tbl_df() %>%
+lgr_trap = read.csv(paste0('Data/IDFG/tblLGDMasterCombineExportJodyW_', pbt.db.date, '.csv')) %>% tbl_df() %>%
   rename(Tag.ID = LGDNumPIT) %>%
   mutate(Date = floor_date(ymd_hms(CollectionDate), unit =),
          LGDSpecies = ifelse(Tag.ID == '3D9.1C2D0A60A1', 1, LGDSpecies),

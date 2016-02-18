@@ -39,11 +39,10 @@ data.frame(Each.Chain = (mcmc.chainLength - mcmc.burn) / mcmc.thin, All.Chains =
 #-----------------------------------------------------------------
 model.loc = 'ModelFiles/LGR_TotalEscape_JAGS.txt'
 
-jags.params = c('X.log.all', 'X.all', 'X.day', 'X.night', 'X.reasc', 'X.all.wild.morph', 'X.new.wild.morph', 'X.all.wild.pbt', 'X.new.wild.pbt', 'X.reasc.wild.morph', 'X.reasc.wild.pbt', 'X.night.wild.morph', 'X.night.wild.pbt', 'X.tot.all', 'X.tot.day', 'X.tot.night', 'X.tot.reasc', 'X.tot.all.wild.morph','X.tot.new.wild.morph', 'X.tot.night.wild.morph', 'X.tot.reasc.wild.morph', 'X.tot.all.wild.pbt', 'X.tot.new.wild.pbt', 'X.tot.night.wild.pbt', 'X.tot.reasc.wild.pbt', 'prop.tagged.morph', 'prop.tagged.pbt', 'X.sigma', 'true.prop', 'win.prop.avg', 'win.prop.true', 'win.prop.sigma', 'hist.prop', 'reasc.avg', 'reasc.true', 'reasc.sigma', 'acf', 'wnc.avg', 'wnc.true', 'wnc.sigma', 'trap.bump', 'r')
+jags.params = c('X.log.all', 'X.all', 'X.day', 'X.night', 'X.reasc', 'X.all.wild.morph', 'X.new.wild.morph', 'X.all.wild.pbt', 'X.new.wild.pbt', 'X.reasc.wild.morph', 'X.reasc.wild.pbt', 'X.night.wild.morph', 'X.night.wild.pbt', 'X.tot.all', 'X.tot.day', 'X.tot.night', 'X.tot.reasc', 'X.tot.all.wild.morph','X.tot.new.wild.morph', 'X.tot.night.wild.morph', 'X.tot.reasc.wild.morph', 'X.tot.all.wild.pbt', 'X.tot.new.wild.pbt', 'X.tot.night.wild.pbt', 'X.tot.reasc.wild.pbt', 'prop.tagged.morph', 'prop.tagged.pbt', 'X.sigma', 'true.prop', 'win.prop.avg', 'win.prop.true', 'win.prop.sigma', 'hist.prop', 'reasc.avg', 'reasc.true', 'reasc.sigma', 'acf', 'wnc.avg', 'wnc.true', 'wnc.sigma', 'trap.rate.true', 'r')
 
-# if using uncertain trap rate
-jags.params = c(jags.params[-match('trap.bump', jags.params)], 'trap.rate.true')
-# jags.params = c(jags.params, 'trap.rate.true')
+# if using fixed, known trap rate
+# jags.params = c(jags.params[-match('trap.rate.true', jags.params)], 'trap.bump')
 
 
 # set initial values

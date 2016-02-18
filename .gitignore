@@ -1,3 +1,6 @@
 .Rproj.user
 .Rhistory
 .RData
+DataPrepped.rda
+JAGS_DataList.rda
+ModelFits
