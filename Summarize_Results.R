@@ -226,12 +226,77 @@ plot_df = left_join(week_summ,
                       ungroup()) %>%
   left_join(hist_day_rate)
 
+#--------------------------------------------------
 # make some plots
+#--------------------------------------------------
+# compare daytime estimates with window counts
+plot_df %>%
+  filter(Variable == 'Daytime.Fish') %>%
+  mutate(inCI = ifelse(low_ci <= win_cnt & upp_ci >= win_cnt, T, F),
+         bias = median - win_cnt,
+         rel_err = ifelse(win_cnt > 0, abs(bias) / win_cnt, NA)) %>%
+  select(Species, Year, week_num, win_cnt, low_ci, upp_ci, inCI, bias, rel_err) %>%
+  group_by(Species, Year) %>%
+  summarize(perc_inCI = sum(inCI) / n(),
+            avg_bias = mean(bias),
+            wt_avg_bias = weighted.mean(bias, w = win_cnt),
+            avg_abs_bias = mean(abs(bias)),
+            wt_avg_abs_bias = weighted.mean(abs(bias), w = win_cnt),
+            avg_rel_err = mean(rel_err, na.rm = T),
+            wt_avg_rel_err = weighted.mean(rel_err, w = win_cnt, na.rm = T))
+
 # pick a species
 spp = 'Chinook'
 spp = 'Steelhead'
 
-# total escapement by week
+# comparison of daytime estimates with window counts
+plot_df %>%
+  filter(Variable == 'Daytime.Fish',
+         Species == spp) %>%
+  ggplot(aes(x = win_cnt,
+             y = median)) +
+  geom_errorbar(aes(ymin = low_ci,
+                    ymax = upp_ci)) +
+  geom_point(size = 4) +
+  geom_abline(intercept = 0,
+              slope = 1,
+              lty = 2,
+              color = 'darkgray') +
+  theme_bw() +
+  geom_smooth(method = lm,
+              formula = y ~ -1 + x,
+              fullrange = T) +
+  facet_wrap(~ Year, scales = 'free') +
+  labs(x = 'Window Count',
+       y = 'Model Estimate',
+       title = paste(spp, 'Crossing During Day'))
+
+# comparison of weekly estimates with trap estimates
+plot_df %>%
+  filter(Variable == 'All.Fish',
+         Species == spp) %>%
+  ggplot(aes(x = trap_est,
+             y = median)) +
+  geom_errorbar(aes(ymin = low_ci,
+                    ymax = upp_ci)) +
+  geom_errorbarh(aes(xmin = trap_est + qnorm(0.025) * trap_est_se,
+                     xmax = trap_est + qnorm(0.975) * trap_est_se)) +
+  geom_point(size = 4) +
+  geom_abline(intercept = 0,
+              slope = 1,
+              lty = 2,
+              color = 'darkgray') +
+  theme_bw() +
+  geom_smooth(method = lm,
+              formula = y ~ -1 + x,
+              fullrange = T) +
+  facet_wrap(~ Year, scales = 'free') +
+  labs(x = 'Trap Estimate',
+       y = 'Model Estimate',
+       title = paste(spp, 'Crossing Each Week'))
+
+
+# total escapement by week, with window, trap and model estimates
 tot_p = plot_df %>%
   filter(Species == spp,
          Variable == 'All.Fish',
@@ -496,6 +561,7 @@ idfg_summ = idfg_pt_est %>%
   filter(est_type == 'PointEstimate') %>%
   select(-est_type, -(H:W))
 
+# compare total window counts, total trap estimates, model total, and IDFG estimates
 tot_summ %>%
   filter(Variable %in% c('Unique.Wild.Fish.Morph', 'Unique.Wild.Fish.PBT')) %>%
   select(Species, Year, Variable, estimate = median) %>%
@@ -517,6 +583,8 @@ tot_summ %>%
                         trap_Wild_Morph = round(sum(Wild.morph / trap_rate, na.rm=T)),
                         trap_Wild_PBT = round(sum(Wild.PBT / trap_rate, na.rm=T)))) %>%
   select(Species, Year, matches('Morph'), matches('PBT'))
+
+
 
 # pull together IDFG bootstrap samples, reformat to match with ISEMP's posteriors
 idfg_boot = gather(idfg_lgr, Name, value, -boot_iter) %>% 

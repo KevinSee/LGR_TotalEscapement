@@ -428,12 +428,13 @@ lgr_weekly = bind_rows(chnk_weekly, sthd_weekly) %>%
          trap_est = ifelse(!is.na(trap_rate),
                            ifelse(Species == 'Steelhead', Wild.morph / trap_rate, 
                                   ifelse(Species == 'Chinook', (Wild.morph + Hatch.morph) / trap_rate, NA)), NA),
-         trap_est_se = ifelse(is.na(Rate_MR_se), 0.001, Rate_MR_se),
+         trap_rate_se = ifelse(is.na(Rate_MR_se), 0.001, Rate_MR_se),
+         trap_est_se = sqrt(trap_rate_se^2 * (-trap_fish * trap_rate^(-2))^2),
          # set up parameters describing trap rate as a beta distribution
-         trap_alpha = ((1 - trap_rate) / trap_est_se^2 - 1 / trap_rate) * trap_rate^2,
+         trap_alpha = ((1 - trap_rate) / trap_rate_se^2 - 1 / trap_rate) * trap_rate^2,
          trap_beta = trap_alpha * (1 / trap_rate - 1),
-         trap_alpha = ifelse(trap_est_se == 0, NA, trap_alpha),
-         trap_beta = ifelse(trap_est_se == 0, NA, trap_beta),
+         trap_alpha = ifelse(trap_rate_se == 0, NA, trap_alpha),
+         trap_beta = ifelse(trap_rate_se == 0, NA, trap_beta),
          trap_alpha = ifelse(trap_open, trap_alpha, 1e-12),
          trap_beta = ifelse(trap_open, trap_beta, 1)) %>%
   # check to see if some trap estimates seem valid
