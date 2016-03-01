@@ -1,7 +1,7 @@
 # Author: Kevin See
 # Purpose: Examine results of total adult escapement model over Lower Granite dam 
 # Created: 2/19/2015
-# Last Modified: 2/17/2016
+# Last Modified: 2/25/2016
 
 library(R2jags)
 library(ggplot2)
@@ -15,6 +15,7 @@ library(tidyr)
 library(lubridate)
 library(ggmcmc)
 
+theme_set(theme_bw())
 
 #-----------------------------------------------------------------
 # Plotting functions
@@ -37,12 +38,20 @@ HPDI_outlier = function(x) {
   return(outs)
 }
 
+#-----------------------------------------------------------------
+# load prepped data
+#-----------------------------------------------------------------
+# load the data for all years
+load(file = 'DataPrepped.rda')
+# load the data list prepped for JAGS
+load(file = 'JAGS_DataList.rda')
+
 
 #-----------------------------------------------------------------
 # model diagnostics
 #-----------------------------------------------------------------
 names(jags_data_list)
-i = 7
+i = 5
 load(paste('ModelFits/LGD_', gsub('\\.', '_', names(jags_data_list)[i]), '.rda', sep=''))
 
 my_ggs = ggs(as.mcmc(adult.pass.mod), family = c('X.sig'))
@@ -83,11 +92,6 @@ ggs_compare_partial(my_ggs)
 #----------------------------------------------------------------------
 # combine results from all years
 #----------------------------------------------------------------------
-# load the data for all years
-load(file = 'DataPrepped.rda')
-# load the data list prepped for JAGS
-load(file = 'JAGS_DataList.rda')
-
 names(jags_data_list)
 tot_post_list = vector('list', length(jags_data_list))
 names(tot_post_list) = names(jags_data_list)
@@ -237,17 +241,16 @@ plot_df %>%
          rel_err = ifelse(win_cnt > 0, abs(bias) / win_cnt, NA)) %>%
   select(Species, Year, week_num, win_cnt, low_ci, upp_ci, inCI, bias, rel_err) %>%
   group_by(Species, Year) %>%
-  summarize(perc_inCI = sum(inCI) / n(),
-            avg_bias = mean(bias),
-            wt_avg_bias = weighted.mean(bias, w = win_cnt),
-            avg_abs_bias = mean(abs(bias)),
-            wt_avg_abs_bias = weighted.mean(abs(bias), w = win_cnt),
-            avg_rel_err = mean(rel_err, na.rm = T),
-            wt_avg_rel_err = weighted.mean(rel_err, w = win_cnt, na.rm = T))
+  summarize(perc_inCI = round(sum(inCI) / n(), 2),
+            avg_bias = round(mean(bias)),
+            wt_avg_bias = round(weighted.mean(bias, w = win_cnt)),
+            avg_abs_bias = round(mean(abs(bias))),
+            wt_avg_abs_bias = round(weighted.mean(abs(bias), w = win_cnt)),
+            avg_rel_err = round(mean(rel_err, na.rm = T), 3),
+            wt_avg_rel_err = round(weighted.mean(rel_err, w = win_cnt, na.rm = T), 3))
 
 # pick a species
-spp = 'Chinook'
-spp = 'Steelhead'
+spp = c('Chinook', 'Steelhead')[1]
 
 # comparison of daytime estimates with window counts
 plot_df %>%
@@ -281,12 +284,15 @@ plot_df %>%
                     ymax = upp_ci)) +
   geom_errorbarh(aes(xmin = trap_est + qnorm(0.025) * trap_est_se,
                      xmax = trap_est + qnorm(0.975) * trap_est_se)) +
-  geom_point(size = 4) +
+  geom_point(size = 4,
+             aes(shape = trap_valid)) +
+  scale_shape_manual(values = c('TRUE' = 19, 'FALSE' = 1),
+                     name = 'Trap Valid') +
   geom_abline(intercept = 0,
               slope = 1,
               lty = 2,
-              color = 'darkgray') +
-  theme_bw() +
+              color = 'red') +
+  
   geom_smooth(method = lm,
               formula = y ~ -1 + x,
               fullrange = T) +
@@ -298,15 +304,18 @@ plot_df %>%
 
 # total escapement by week, with window, trap and model estimates
 tot_p = plot_df %>%
-  filter(Species == spp,
-         Variable == 'All.Fish',
-         trap_est < 1e13) %>%
+  filter(Species == spp) %>%
+  filter(Variable == 'All.Fish') %>%
   ggplot(aes(x = Start_Date, y = median)) +
   geom_ribbon(aes(ymin = low_ci, ymax = upp_ci), fill = 'lightgray') +
   geom_line(aes(y = win_cnt, color = 'Window')) +
   geom_point(aes(y = win_cnt, color = 'Window')) +
   geom_line(aes(y = trap_est, color = 'Trap')) +
-  geom_point(aes(y = trap_est, color = 'Trap')) +
+  geom_point(aes(y = trap_est, 
+                 color = 'Trap',
+                 shape = trap_valid)) +
+  scale_shape_manual(values = c('TRUE' = 19, 'FALSE' = 1),
+                     name = 'Trap Valid') +
   geom_line(aes(color = 'Model')) +
   geom_point(aes(color = 'Model')) +
   scale_color_manual(values = c('Model' = 'black', 'Window' = 'blue', 'Trap' = 'red')) +
@@ -316,26 +325,22 @@ tot_p = plot_df %>%
   labs(x = 'Date', y = 'Estimate', color = 'Source', title = paste('All Fish -', spp))
 tot_p
 
+ggsave(paste0('Figures/TotEscape_TimeSeries_', spp, '.pdf'),
+       tot_p,
+       width = 9,
+       height = 6,
+       units = 'in')
 
 plot_df %>%
   filter(Variable == 'All.Fish') %>%
-  mutate(trap_est = ifelse(trap_est > 1e13, NA, trap_est)) %>%
-  group_by(Species, Year) %>%
-  summarise(tot_win = sum(win_cnt),
-            tot_trap = floor(sum(trap_est, na.rm=T)),
-            tot_est = floor(sum(median)))
-  
-plot_df %>%
-  filter(Variable == 'All.Fish') %>%
-  mutate(trap_est = ifelse(trap_est > 1e13, NA, trap_est),
-         est_wind = floor(median - win_cnt),
+  mutate(est_wind = floor(median - win_cnt),
          est_trap = floor(median - trap_est)) %>%
   group_by(Species, Year) %>%
   summarise(max_win_diff = max(est_wind, na.rm = T),
-            mean_win_diff = mean(est_wind, na.rm = T),
+            mean_win_diff = round(mean(est_wind, na.rm = T)),
             min_win_diff = min(est_wind, na.rm = T),
             max_trap_diff = max(est_trap, na.rm = T),
-            mean_trap_diff = mean(est_trap, na.rm = T),
+            mean_trap_diff = round(mean(est_trap, na.rm = T)),
             min_trap_diff = min(est_trap, na.rm = T))
   
 # look at rates of wild (morph & PBT) fish
@@ -393,33 +398,9 @@ plot_df %>%
                                 'Model' = 'black')) +
   theme_bw() +
   facet_wrap(~ Year) +
+  # coord_cartesian(ylim = c(0.7, 1.02)) +
   labs(x = 'Week', y = 'Rate', title = paste(spp, 'Daytime Passage Rate'), size = 'Wild Tags', color = 'Source')
 
-
-
-# look at night passage vs. reascension
-plot_x_max = filter(tot_post,
-                    Variable %in% c('Night.Wild.Fish.Morph', 'Wild.Reascents.Morph')) %>%
-  summarise(max_x = quantile(value, 0.99)) %>% as.numeric()
-night_reasc_p = filter(tot_post,
-                       Variable %in% c('Night.Wild.Fish.Morph', 'Wild.Reascents.Morph'),
-                       value < plot_x_max) %>%
-  ggplot(aes(x = value)) +
-  geom_density(aes(color = Variable, fill = Variable), alpha=0.2, lwd=1.5) +
-  facet_grid(Year ~ Species) +
-  scale_color_brewer(palette = 'Set1', name = 'Fish', labels = c('Night Passage', 'Re-ascents')) +
-  scale_fill_brewer(palette = 'Set1', name = 'Fish', labels = c('Night Passage', 'Re-ascents')) +
-  theme_bw() +
-  theme(axis.text.y = element_blank()) +
-  labs(x = 'Total Fish', 
-       y = 'Density',
-       title = 'Night Passage vs. Re-ascension')
-
-# ggsave(filename = '/Users/kevin/Dropbox/ISEMP/Reports&Meetings/2015_10_SummaryForJoeConner/Images/LGR_NightReascent.pdf',
-#        plot = night_reasc_p,
-#        width = 10,
-#        height = 6.8,
-#        units = 'in')
 
 # Look at posteriors of trap bump parameter
 # other_post %>%
@@ -434,9 +415,10 @@ night_reasc_p = filter(tot_post,
 #   labs(x = 'Posterior', title = 'Trap Bump')
 
 # Look at posteriors of over dispersion parameter
+# overdispersed if r is small, approximately Poisson if r is very large
 other_post %>%
   filter(Variable == 'Over.Dispersion',
-         value < 30) %>%
+         value < 100) %>%
   mutate(Year = as.factor(Year)) %>%
   ggplot(aes(x = value, color = Year, fill = Year)) +
   geom_density(alpha = 0.2, lwd=1.5) +
@@ -474,10 +456,10 @@ plot_df %>%
   # geom_point(aes(y = Rate, color = 'Goal')) +
   geom_line(aes(y = RateCalc, color = 'Time - Calculated')) +
   geom_point(aes(y = RateCalc, color = 'Time - Calculated', size = win_cnt)) +
-#   geom_line(aes(y = trap_rate, color = 'Mark Recapture')) +
-#   geom_point(aes(y = trap_rate, color = 'Mark Recapture', size = win_cnt)) +
-  geom_line(aes(y = trap_rate, color = 'Model Input')) +
-  geom_point(aes(y = trap_rate, color = 'Model Input', size = win_cnt)) +
+  geom_line(aes(y = trap_rate, color = 'Mark Recapture')) +
+  geom_point(aes(y = trap_rate, color = 'Mark Recapture', size = win_cnt)) +
+#   geom_line(aes(y = trap_rate, color = 'Model Input')) +
+#   geom_point(aes(y = trap_rate, color = 'Model Input', size = win_cnt)) +
   geom_line(aes(color = 'Estimate')) +
   geom_point(aes(color = 'Estimate')) +
   geom_point(aes(shape = trap_valid),
@@ -500,6 +482,31 @@ plot_df %>%
        shape = 'Valid Trap Rate')
 
 # compare night-time ascension and re-acension totals
+# for wild fish
+plot_x_max = filter(tot_post,
+                    Variable %in% c('Night.Wild.Fish.PBT', 'Wild.Reascents.PBT')) %>%
+  # Variable %in% c('Night.Wild.Fish.Morph', 'Wild.Reascents.Morph')) %>%
+  group_by(Species) %>%
+  summarise(max_x = quantile(value, 0.999))
+night_reasc_p = filter(tot_post,
+                       Variable %in% c('Night.Wild.Fish.PBT', 'Wild.Reascents.PBT')) %>%
+  # Variable %in% c('Night.Wild.Fish.Morph', 'Wild.Reascents.Morph')) %>%
+  left_join(plot_x_max) %>%
+  filter(value < max_x) %>%
+  mutate(Variable = factor(Variable, levels = c('Night.Wild.Fish.PBT', 'Wild.Reascents.PBT'))) %>%
+  ggplot(aes(x = value)) +
+  geom_density(aes(color = Variable, fill = Variable), alpha=0.2, lwd=1.5) +
+  facet_grid(Year ~ Species, scales = 'free') +
+  scale_color_brewer(palette = 'Set1', name = 'Fish', labels = c('Night Passage', 'Re-ascents')) +
+  scale_fill_brewer(palette = 'Set1', name = 'Fish', labels = c('Night Passage', 'Re-ascents')) +
+  theme_bw() +
+  theme(axis.text.y = element_blank()) +
+  labs(x = 'Total Fish', 
+       y = 'Density',
+       title = 'Night Passage vs. Re-ascension\nWild Fish')
+night_reasc_p
+
+# by total fish
 night_reasc_df = tot_post %>%
   filter(Variable %in% c('All.Fish', 'Daytime.Fish', 'Reascent.Fish')) %>%
   group_by(Variable) %>%
@@ -508,26 +515,98 @@ night_reasc_df = tot_post %>%
   spread(Variable, value) %>%
   mutate(Night.Fish = All.Fish - Daytime.Fish) %>%
   select(-(All.Fish:Daytime.Fish)) %>%
-  gather(Variable, value, -(Species:iter))
+  gather(Variable, value, -(Species:iter)) %>%
+  mutate(Variable = factor(Variable, levels = c('Night.Fish', 'Reascent.Fish')))
 
-plot_x_max = filter(night_reasc_df,
+plot_x_max2 = filter(night_reasc_df,
                     Variable %in% c('Night.Fish', 'Reascent.Fish')) %>%
-  summarise(max_x = quantile(value, 0.99)) %>% as.numeric()
-night_reasc_p = filter(night_reasc_df,
-                       Variable %in% c('Night.Fish', 'Reascent.Fish'),
-                       value < plot_x_max) %>%
+  group_by(Species) %>%
+  summarise(max_x = quantile(value, 0.999))
+night_reasc_p2 = filter(night_reasc_df,
+                        Variable %in% c('Night.Fish', 'Reascent.Fish')) %>%
+  left_join(plot_x_max2) %>%
+  filter(value < max_x) %>%
   ggplot(aes(x = value)) +
   geom_density(aes(color = Variable, fill = Variable), alpha=0.2, lwd=1.5) +
-  facet_grid(Year ~ Species) +
+  facet_grid(Year ~ Species, scale = 'free') +
   scale_color_brewer(palette = 'Set1', name = 'Fish', labels = c('Night Passage', 'Re-ascents')) +
   scale_fill_brewer(palette = 'Set1', name = 'Fish', labels = c('Night Passage', 'Re-ascents')) +
   theme_bw() +
   theme(axis.text.y = element_blank()) +
   labs(x = 'Total Fish', 
        y = 'Density',
-       title = 'Night Passage vs. Re-ascension')
-night_reasc_p
+       title = 'Night Passage vs. Re-ascension\nAll Fish')
+night_reasc_p2
 
+# for wild fish, by week
+plot_df %>%
+  filter(Species == spp,
+         Variable == 'Wild.Reascents') %>%
+  select(Species:week_num, Start_Date, ReAsc = median, ReAsc_lowCI = low_ci, ReAsc_uppCI = upp_ci) %>%
+  full_join(plot_df %>%
+              filter(Species == spp,
+                     Variable == 'Night.Wild.Fish') %>%
+              select(Species:week_num, Start_Date, Night = median, Night_lowCI = low_ci, Night_uppCI = upp_ci)) %>%
+  full_join(lgr_weekly %>%
+              filter(Species == spp) %>%
+              select(Species, Year = SpawnYear, week_num, Start_Date, win_cnt, trap_est, trap_valid)) %>%
+  ggplot(aes(x = week_num)) +
+  geom_ribbon(aes(ymin = ReAsc_lowCI,
+                  ymax = ReAsc_uppCI,
+                  fill = 'reasc'), 
+              alpha = 0.3) +
+  geom_ribbon(aes(ymin = Night_lowCI,
+                  ymax = Night_uppCI,
+                  fill = 'night'), 
+              alpha = 0.3) +
+  geom_line(aes(y = ReAsc,
+                color = 'reasc')) +
+  geom_line(aes(y = Night,
+                color = 'night')) +
+  scale_fill_manual(values = c('reasc' = 'pink',
+                               'night' = 'lightblue'),
+                    labels = c('reasc' = 'Re-Ascension',
+                               'night' = 'Night Passage'),
+                    name = 'Variable') +
+  scale_color_manual(values = c('reasc' = 'red',
+                               'night' = 'blue'),
+                     labels = c('reasc' = 'Re-Ascension',
+                                'night' = 'Night Passage'),
+                     name = 'Variable') +
+  facet_wrap(~ Year, scales = 'free') +
+  labs(x = 'Week',
+       y = 'Fish',
+       title = paste('Night-passage & Re-ascension - Wild', spp))
+
+# difference between model estimate and window count / trap estimate, by week
+plot_df %>%
+  filter(Species == spp) %>%
+  filter(Variable == 'All.Fish') %>%
+  ggplot(aes(x = Start_Date)) +
+  geom_ribbon(aes(ymin = low_ci - win_cnt,
+                  ymax = upp_ci - win_cnt,
+                  fill = 'Window'),
+              alpha = 0.5) +
+  geom_ribbon(aes(ymin = low_ci - trap_est,
+                  ymax = upp_ci - trap_est,
+                  fill = 'Trap'),
+              alpha = 0.5) +
+  geom_line(aes(y = median - win_cnt,
+                color = 'Window')) +
+  geom_line(aes(y = median - trap_est,
+                color = 'Trap')) +
+  geom_hline(yintercept = 0,
+             lty = 2) +
+  scale_fill_manual(name = 'Source',
+                    values = c('Window' = 'lightblue',
+                               'Trap' = 'pink')) +
+  scale_color_manual(name = 'Source',
+                     values = c('Window' = 'blue',
+                                'Trap' = 'red')) +
+  facet_wrap(~ Year, scales = 'free') +
+  labs(x = 'Date',
+       y = 'Model - Data',
+       title = paste('Difference Between Model and Window Counts / Trap Estimates\nFor', spp))
 
 #----------------------------------------------------------------------
 # add IDFG estimates for comparison
@@ -575,8 +654,7 @@ tot_summ %>%
                      IDFG_Wild_PBT = Wild_PBT)) %>%
   left_join(lgr_weekly %>%
               rename(Year = SpawnYear) %>%
-              mutate(trap_est = ifelse(trap_est > 1e13, NA, trap_est),
-                     trap_rate = ifelse(trap_rate < 1e-12, NA, trap_rate)) %>%
+              mutate(trap_rate = ifelse(trap_rate < 1e-12, NA, trap_rate)) %>%
               group_by(Species, Year) %>%
               summarise(win_Wild_Morph = round(sum(win_cnt * (Wild.morph / trap_fish), na.rm=T)),
                         win_Wild_PBT = round(sum(win_cnt * (Wild.PBT / trap_fish), na.rm=T)),
@@ -632,21 +710,88 @@ tot_comp = tot_post %>%
          yr_grp = paste(Year, Org, sep = '_')) %>%
   select(-Group)
 
-tot_comp %>%
-  # filter(Type == 'PBT') %>%
+pos_dodge = 0.9
+idfg_isemp_p = tot_comp %>%
+  filter(Type == 'PBT') %>%
   ggplot(aes(x = Year, y = estimate, fill = yr_grp)) +
-  stat_summary(fun.y=HPDI_outlier, geom='point', size=1, color='gray', position=position_dodge(width=0.9)) +
-  stat_summary(fun.data=HPDI_boxplot, geom='errorbar', width=0.4, position=position_dodge(width=0.9)) +
-  stat_summary(fun.data=HPDI_boxplot, geom='boxplot', middle.def='Mode', position='dodge') +
-  stat_summary(fun.y=median, geom='point', pch=1, position=position_dodge(width=0.9)) +
-  stat_summary(fun.y=mean, geom='point', pch=4, position=position_dodge(width=0.9)) +
+  stat_summary(fun.y=HPDI_outlier, geom='point', size=1, color='gray', position=position_dodge(width=pos_dodge)) +
+  stat_summary(fun.data=HPDI_boxplot, geom='errorbar', width=0.4, position=position_dodge(width=pos_dodge)) +
+  stat_summary(fun.data=HPDI_boxplot, geom='boxplot', middle.def='Mode', position=position_dodge(width=pos_dodge)) +
+  stat_summary(fun.y=median, geom='point', pch=1, position=position_dodge(width=pos_dodge)) +
+  stat_summary(fun.y=mean, geom='point', pch=4, position=position_dodge(width=pos_dodge)) +
   scale_fill_brewer(palette='Paired', name='Estimate', labels=paste(rep(2010:2015, each=2), c('IDFG', 'ISEMP')), guide=guide_legend(nrow=2)) +
-  # facet_wrap(~ Species, scales = 'free') +
-  facet_grid(Species ~ Type, scales = 'free') +
+  geom_point(data = lgr_weekly %>%
+               mutate(trap_rate = ifelse(trap_rate < 1e-12, NA, trap_rate)) %>%
+               group_by(Species, Year = SpawnYear) %>%
+               summarise(win_Wild_Morph = round(sum(win_cnt * (Wild.morph / trap_fish), na.rm=T)),
+                         win_Wild_PBT = round(sum(win_cnt * (Wild.PBT / trap_fish), na.rm=T)),
+                         trap_Wild_Morph = round(sum(Wild.morph / trap_rate, na.rm=T)),
+                         trap_Wild_PBT = round(sum(Wild.PBT / trap_rate, na.rm=T))) %>%
+               select(Species:Year, everything()) %>%
+               gather(Source, estimate, -(Species:Year)) %>%
+               mutate(Type = ifelse(grepl('PBT', Source), 'PBT', 'Morph')) %>%
+               mutate(Source = gsub('_Wild_PBT', '', gsub('_Wild_Morph', '', Source)),
+                      Source = revalue(Source, c('win' = 'Window', 'trap' = 'Trap'))) %>%
+               filter(Type == 'PBT') %>%
+               mutate(yr_grp = NA),
+             aes(x = Year, 
+                 y = estimate,
+                 shape = Source),
+             size = 5,
+             color = 'darkred') +
+  scale_shape_manual(values = c('Window' = 4,
+                                'Trap' = 8)) +
+  facet_wrap(~ Species, scales = 'free') +
+  # facet_grid(Species ~ Type, scales = 'free') +
   theme_bw() +
   theme(legend.position='bottom', axis.text.x = element_text(size=7)) +
   labs(title='Total Escapement over Lower Granite Dam', y='Wild Fish', x='Run Year')
+idfg_isemp_p
 
+ggsave('Figures/IDFG_ISEMP_comparison.pdf',
+       idfg_isemp_p,
+       width = 9,
+       height = 6,
+       units = 'in')
+
+
+# how do window counts compare for ISEMP and IDFG?
+# we expect steelhead to differ somewhat by random chance (ISEMP uses unclipped, IDFG uses all)
+lgr_weekly %>%
+  group_by(Species, SpawnYear) %>%
+  summarise(ISEMP_tot_win = sum(win_cnt)) %>%
+  left_join(idfg_pt_est %>%
+              mutate(Species = revalue(Species, c('Chnk' = 'Chinook',
+                                                  'Sthd' = 'Steelhead'))) %>%
+              filter(est_type == 'PointEstimate',
+                     !(Species == 'Steelhead' & Type == 'H')) %>%
+              group_by(Species, SpawnYear = Year) %>%
+              summarise(IDFG_tot_win = sum(estimate))) %>%
+  mutate(diff = ISEMP_tot_win - IDFG_tot_win)
+
+tot_post %>%
+  filter(Variable == 'All.Fish') %>%
+  mutate(Year = as.factor(as.character(Year))) %>%
+  ggplot(aes(x = Year, y = value, fill = Year)) +
+  stat_summary(fun.y=HPDI_outlier, geom='point', size=1, color='gray', position=position_dodge(width=pos_dodge)) +
+  stat_summary(fun.data=HPDI_boxplot, geom='errorbar', width=0.4, position=position_dodge(width=pos_dodge)) +
+  stat_summary(fun.data=HPDI_boxplot, geom='boxplot', middle.def='Mode', position=position_dodge(width=pos_dodge)) +
+  stat_summary(fun.y=median, geom='point', pch=1, position=position_dodge(width=pos_dodge)) +
+  stat_summary(fun.y=mean, geom='point', pch=4, position=position_dodge(width=pos_dodge)) +
+  scale_fill_brewer(palette = 'Set1') +
+  geom_point(data = lgr_weekly %>%
+               group_by(Species, Year = SpawnYear) %>%
+               summarise(ISEMP_tot_win = sum(win_cnt),
+                         ISEMP_tot_trap = sum(trap_est, na.rm = T)) %>%
+               mutate(Year = as.factor(as.character(Year))) %>%
+               gather(Source, value, -(Species:Year)),
+             aes(shape = Source),
+             size = 6) +
+  scale_shape_manual(values = c('ISEMP_tot_win' = 19,
+                                'ISEMP_tot_trap' = 17),
+                     labels = c('ISEMP_tot_win' = 'Window',
+                                'ISEMP_tot_trap' = 'Trap')) +
+  facet_wrap(~ Species, scales = 'free')
 
 # example plot
 ex_plot_df = tot_post %>%
@@ -689,12 +834,13 @@ tot_plot_df = tot_post %>%
   mutate(iter = 1:length(value)) %>%
   ungroup() %>%
   filter(Variable %in% c('All.Fish', 'Daytime.Fish', 'All.Wild.Fish.PBT', 'Unique.Wild.Fish.PBT', 'All.Wild.Fish.Morph', 'Unique.Wild.Fish.Morph'),
-         value < 2.1e5)
+         value < 2.1e5) %>%
+  mutate(Variable = factor(Variable, levels = c('All.Fish', 'Daytime.Fish', 'All.Wild.Fish.PBT', 'Unique.Wild.Fish.PBT', 'All.Wild.Fish.Morph', 'Unique.Wild.Fish.Morph')))
 
 ggplot(tot_plot_df, aes(x = value, group = Variable, color = Variable)) +
   geom_density(aes(fill=Variable), lwd=1.5, alpha=0.2) +
-  scale_color_brewer(palette = 'Set1') +
-  scale_fill_brewer(palette = 'Set1') +
+  scale_color_brewer(palette = 'Paired') +
+  scale_fill_brewer(palette = 'Paired') +
   theme_bw() +
   facet_grid(Year ~ Species, scales = 'free') +
   geom_vline(data = lgr_weekly %>%

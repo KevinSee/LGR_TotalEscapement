@@ -1,7 +1,7 @@
 # Author: Kevin See
 # Purpose: this R script estimates adult Chinook and steelhead LGR passage by week based on both window counts and counts in a fish trap in the ladder
 # Created: 2/19/2015
-# Last Modified: 2/17/2016
+# Last Modified: 2/24/2016
 # Notes: It is run on a weekly time-step
 
 library(R2jags)

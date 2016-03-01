@@ -1,7 +1,7 @@
 # Author: Kevin See
 # Purpose: pull together window counts and trap data from Lower Granite dam, queried by DART (http://www.cbr.washington.edu/dart)
-# Created: 10/07/2015
-# Last Modified: 2/17/2016
+# Created: 2/23/2016
+# Last Modified: 2/25/2016
 # Notes: 
 # Window counts: http://www.cbr.washington.edu/dart/query/adult_daily
 # Trap sample rates: http://www.cbr.washington.edu/dart/query/pitadult_valid - Sample Time/Rates
@@ -14,6 +14,7 @@ library(plyr)
 library(dplyr)
 library(lubridate)
 library(tidyr)
+library(magrittr)
 library(FSA)
 library(Rcapture)
 library(boot)
@@ -31,26 +32,19 @@ wind_cnts = read.csv('Data/WindowCounts/adultdaily_1444247382_835.csv') %>%
   mutate(window_open = T,
          Date = ymd(Date)) %>%
   # drop Fall Chinook
-  mutate(Chin = ifelse(Chinook.Run %in% c('Sp', 'Su'), Chin, NA),
-         JChin = ifelse(Chinook.Run %in% c('Sp', 'Su'), JChin, NA)) %>%
+  mutate(Chin = ifelse(month(Date) > 8 | (month(Date) == 8 & mday(Date) > 17), NA, Chin),
+         JChin = ifelse(month(Date) > 8 | (month(Date) == 8 & mday(Date) > 17), NA, JChin)) %>%
   select(-Project, -Chinook.Run, -(Sock:TempC))
 
 #--------------------------------------------------------
 # for dividing by weeks
-chnk_weeks = ldply(as.list(2010:year(max(wind_cnts$Date))),
-                   function(x) interval(ymd(paste0(x,'0317')) + weeks(0:22), ymd(paste0(x,'0317')) + weeks(1:23) - eseconds(1)))
-rownames(chnk_weeks) = 2010:year(max(wind_cnts$Date))
-
-sthd_weeks = ldply(as.list(2010:year(max(wind_cnts$Date))),
-                   function(x) interval(ymd(paste0(x-1,'0701')) + weeks(0:52), ymd(paste0(x-1,'0701')) + weeks(1:53) - eseconds(1)))
-rownames(sthd_weeks) = 2010:year(max(wind_cnts$Date))
-
+n_wks_tot = as.numeric(difftime(max(wind_cnts$Date), min(wind_cnts$Date), units = 'weeks'))
+week_strata = interval(ymd('20090701') + weeks(0:n_wks_tot), ymd('20090701') + weeks(1:(n_wks_tot + 1)) - eseconds(1))
 
 #--------------------------------------------------------
 # pull together all trap rates from DART
 # all Chinook trap rates are identical to steelhead, so only read in the steelhead ones
-
-trap_rates = read.csv('Data/TrapSampleRates/pit_adult_valid_2009_3.csv') %>%
+trap_rates_org = read.csv('Data/TrapSampleRates/pit_adult_valid_2009_3.csv') %>%
   bind_rows(read.csv('Data/TrapSampleRates/pit_adult_valid_2010_3.csv')) %>%
   bind_rows(read.csv('Data/TrapSampleRates/pit_adult_valid_2011_3.csv')) %>%
   bind_rows(read.csv('Data/TrapSampleRates/pit_adult_valid_2012_3.csv')) %>%
@@ -60,9 +54,18 @@ trap_rates = read.csv('Data/TrapSampleRates/pit_adult_valid_2009_3.csv') %>%
   rename(n.Samples = X.Samples,
          n.SbyC = X.SbyC,
          n.Close = X.Close) %>%
+  mutate(Date = mdy(Date))
+
+# deal with fact that some days have two rows in data (different rates during different times of day)
+trap_rates = trap_rates_org %>%
+  group_by(Date, Year, DOY) %>%
+  summarise_each(funs(sum(., na.rm = T)), SampTime:SecondsInDay) %>%
+  left_join(trap_rates_org %>%
+              group_by(Date, Year, DOY) %>%
+              summarise_each(funs(weighted.mean(., na.rm = T, w = TotalTime)), Rate:ActualRateInclusiveTime)) %>%
   mutate(trap_open = T,
-         Date = mdy(Date),
          RateCalc = TotalTimeInclusive / SecondsInDay)
+
 
 #--------------------------------------------------------
 # night passage & reascension data
@@ -89,7 +92,7 @@ lgr_details = read.csv('Data/TagDetails/pitadultwindow_upper_tagid_GRA_2010_1_no
          ReAscent = ifelse(TagID.Ascent.Count > 1, T, F),
          SpawnYear = ifelse(Species == 'Chinook', year(Date),
                             ifelse(Date >= ymd(paste0(year(Date), '0701')), year(Date) + 1, year(Date)))) %>%
-  filter(!(Species == 'Chinook' & (Date < ymd(paste0(year(Date), '0317')) | Date > ymd(paste0(year(Date), '0817')))))
+  filter(!(Species == 'Chinook' & (Date < ymd(paste0(year(Date), '0301')) | Date > ymd(paste0(year(Date), '0817')))))
 
 # summarise rates by day
 lgr_night_reasc_daily = select(lgr_details,
@@ -105,24 +108,16 @@ lgr_night_reasc_daily = select(lgr_details,
             reascent_tags_W = length(unique(TagID[ReAscent & Rear.Type == 'W']))) %>%
   ungroup() %>%
   filter(SpawnYear >= 2010, SpawnYear <= 2015) %>%
-  mutate(week_num = NA)
+  mutate(week_num_org = NA)
 
 # assign week numbers to each day
-for(i in 1:nrow(chnk_weeks)) {
-  for(j in 1:ncol(chnk_weeks)) {
-    lgr_night_reasc_daily$week_num[with(lgr_night_reasc_daily, which(Species == 'Chinook' & SpawnYear == rownames(chnk_weeks)[i] & Date %within% chnk_weeks[i,j]))] = j
-  }
-}
-
-for(i in 1:nrow(sthd_weeks)) {
-  for(j in 1:ncol(sthd_weeks)) {
-    lgr_night_reasc_daily$week_num[with(lgr_night_reasc_daily, which(Species == 'Steelhead' & SpawnYear == rownames(sthd_weeks)[i] & Date %within% sthd_weeks[i,j]))] = j
-  }
+for(i in 1:length(week_strata)) {
+  lgr_night_reasc_daily$week_num_org[with(lgr_night_reasc_daily, which(Date %within% week_strata[i]))] = i
 }
 
 # summarise weekly
 lgr_night_reasc_weekly = lgr_night_reasc_daily %>%
-  group_by(Species, SpawnYear, week_num) %>%
+  group_by(Species, SpawnYear, week_num_org) %>%
   summarise_each(funs(sum), tot_tags:reascent_tags_W) %>%
   ungroup()
 
@@ -191,63 +186,73 @@ lgr_daily = wind_cnts %>%
   filter(Species %in% c('AllChin', 'WStlhd')) %>%
   mutate(Species = revalue(Species, c('AllChin' = 'Chinook', 'WStlhd' = 'Steelhead')),
          win_cnt = ifelse(is.na(win_cnt), 0, win_cnt)) %>%
-  full_join(trap_rates %>%
-              select(Date, trap_open, matches('Rate'), one_of(c('TotalTimeInclusive', 'SecondsInDay')))) %>%
-  left_join(lgr_trap_summ) %>%
+  full_join(lgr_trap_summ %>%
+              select(-SpawnYear)) %>%
   mutate(SpawnYear = ifelse(Species == 'Chinook', year(Date),
                             ifelse(Date >= ymd(paste0(year(Date), '0701')), year(Date) + 1, year(Date)))) %>%
-  filter(!(Species == 'Chinook' & (Date < ymd(paste0(year(Date), '0317')) | Date > ymd(paste0(year(Date), '0817')))),
-         SpawnYear <= 2015,
-         SpawnYear >= 2010) %>%
+  filter(!(Species == 'Chinook' & (Date < ymd(paste0(year(Date), '0301')) | Date > ymd(paste0(year(Date), '0817')))),
+         SpawnYear >= 2010,
+         SpawnYear <= 2015) %>%
+  # pull in trap rates
+  left_join(trap_rates %>%
+              select(Date, trap_open, matches('Rate'), one_of(c('TotalTimeInclusive', 'SecondsInDay')))) %>%
   # estimate total escapement for each day by trap fish / trap rate
   mutate(trap_est = ifelse(RateCalc > 0, 
                            ifelse(Species == 'Steelhead', Wild.morph / RateCalc, 
                                   ifelse(Species == 'Chinook', (Wild.morph + Hatch.morph) / RateCalc, NA)), NA),
-         week_num = NA,
+         week_num_org = NA,
   # create filters for whether window and/or trap is open
          window_open = ifelse(is.na(window_open), F, window_open),
          trap_open = ifelse(is.na(trap_open) | RateCalc == 0, F, trap_open)) %>%
-  left_join(select(lgr_night_reasc_daily, -week_num))
-
+  select(Species, Date, Year, SpawnYear, matches('week_num'), everything())
 # assign week number
-for(i in 1:nrow(chnk_weeks)) {
-  for(j in 1:ncol(chnk_weeks)) {
-    lgr_daily$week_num[with(lgr_daily, which(Species == 'Chinook' & SpawnYear == rownames(chnk_weeks)[i] & Date %within% chnk_weeks[i,j]))] = j
-  }
+for(i in 1:length(week_strata)) {
+  lgr_daily$week_num_org[with(lgr_daily, which(Date %within% week_strata[i]))] = i
 }
+lgr_daily %<>%
+  left_join(lgr_night_reasc_daily) %>%
+  group_by(Species, SpawnYear) %>%
+  summarise(min_week = min(week_num_org)) %>%
+  left_join(lgr_daily) %>%
+  group_by(Species, SpawnYear) %>%
+  mutate(week_num = week_num_org - min_week + 1) %>%
+  select(-min_week)
 
-for(i in 1:nrow(sthd_weeks)) {
-  for(j in 1:ncol(sthd_weeks)) {
-    lgr_daily$week_num[with(lgr_daily, which(Species == 'Steelhead' & SpawnYear == rownames(sthd_weeks)[i] & Date %within% sthd_weeks[i,j]))] = j
-  }
-}
+lgr_daily %>%
+  group_by(Species, SpawnYear) %>%
+  summarise(min_week = min(week_num),
+            min_org_week = min(week_num_org),
+            max_week = max(week_num),
+            min_date = min(Date),
+            max_date = max(Date))
+
 
 # transform to weekly summaries
 lgr_weekly = lgr_daily %>%
-  group_by(Species, SpawnYear, week_num) %>%
+  group_by(Species, SpawnYear, week_num_org, week_num) %>%
   summarise_each(funs(sum(., na.rm=T)), win_cnt, trap_fish:NA.PBT) %>%
   left_join(lgr_daily %>%
-              group_by(Species, SpawnYear, week_num) %>%
+              group_by(Species, SpawnYear, week_num_org, week_num) %>%
               summarise_each(funs(mean(., na.rm=T)), Rate:ActualRateInclusiveTime)) %>%
   left_join(lgr_daily %>%
-              group_by(Species, SpawnYear, week_num) %>%
+              group_by(Species, SpawnYear, week_num_org, week_num) %>%
               summarise(Start_Date = min(Date),
                         RateCalc = sum(TotalTimeInclusive, na.rm=T) / (172800 * length(SecondsInDay)),
                         window_open = ifelse(sum(window_open) > 0, T, F),
                         trap_open = ifelse(sum(trap_open) > 0, T, F))) %>%
-  mutate(trap_est = ifelse(trap_open & RateCalc > 0, 
-                           ifelse(Species == 'Steelhead', Wild.morph / RateCalc, 
-                                  ifelse(Species == 'Chinook', (Wild.morph + Hatch.morph) / RateCalc, NA)), NA)) %>%
   ungroup() %>%
   left_join(lgr_night_reasc_weekly) %>%
-  select(Species:week_num, Start_Date, everything())
+  select(Species:week_num, Start_Date, everything()) %>%
+    mutate(trap_est = ifelse(trap_open & RateCalc > 0, 
+                             ifelse(Species == 'Steelhead', Wild.PBT / RateCalc, 
+                                    ifelse(Species == 'Chinook', (Wild.PBT + Hatch.PBT) / RateCalc, NA)), NA))
 
 # do daily and weekly data have same number of fish at window and trap in total?
 identical(group_by(lgr_weekly, Species, SpawnYear) %>%
             summarise(tot_cnts = sum(win_cnt),
                       tot_trap = sum(trap_fish)),
           group_by(lgr_daily, Species, SpawnYear) %>%
-            summarise(tot_cnts = sum(win_cnt),
+            summarise(tot_cnts = sum(win_cnt, na.rm = T),
                       tot_trap = sum(trap_fish, na.rm=T)))
 
 
@@ -260,23 +265,6 @@ filter(lgr_weekly, trap_est < 50000) %>%
   facet_grid(SpawnYear ~ Species, scales = 'free') +
   labs(x = 'Window', y = 'Trap', color = 'Spawn Year', fill = 'Spawn Year') +
   theme_bw()
-
-spp = c('Chinook', 'Steelhead')[1]
-filter(lgr_weekly,
-       Species == spp) %>%
-  select(SpawnYear, window_open, trap_open, week_num, win_cnt, trap_est) %>%
-  gather(Method, Estimate, -(SpawnYear:week_num)) %>%
-  mutate(Method = revalue(Method, c('win_cnt' = 'Window', 'trap_est' = 'Trap')),
-         Open = ifelse(Method == 'Window', window_open, trap_open)) %>%
-  select(SpawnYear, week_num, Method, Open, Estimate) %>%
-  arrange(SpawnYear, week_num, Method) %>%
-  ggplot(aes(x = week_num, y = Estimate, color = Method)) +
-  geom_point(aes(shape = Open)) +
-  scale_shape_manual(values = c('TRUE' = 19, 'FALSE' = 1)) +
-  geom_line() +
-  facet_wrap(~ SpawnYear, scales = 'free') +
-  scale_color_brewer(palette = 'Set1') +
-  labs(x = 'Week', title = spp, color = 'Source')
 
 # look at trap rate
 spp = c('Chinook', 'Steelhead')[1]
@@ -294,135 +282,82 @@ filter(lgr_weekly,
 
 #--------------------------------------------------------
 # for mark-recapture estimate of trap rate, read in data prepped by Rick Orme
-trap_mr_org = read.csv('Data/PIT tag based LGR trap rate.csv') %>% tbl_df() %>%
-  rename(Species = species) %>%
-  mutate(Ladder = mdy(Ladder),
-         LGR.Trap = mdy(LGR.Trap),
-         Year = ifelse(!is.na(Ladder), year(Ladder), year(LGR.Trap)),
-         M = ifelse(is.na(LGR.Trap), 0, 1),
-         C = ifelse(is.na(Ladder), 0, 1),
+# trap_mr_org = read.csv('Data/PIT tag based LGR trap rate.csv') %>% tbl_df() %>%
+#   rename(Species = species) %>%
+#   mutate(Ladder = mdy(Ladder),
+#          LGR.Trap = mdy(LGR.Trap),
+#          Year = ifelse(!is.na(Ladder), year(Ladder), year(LGR.Trap)),
+#          M = ifelse(is.na(LGR.Trap), 0, 1),
+#          C = ifelse(is.na(Ladder), 0, 1),
+#          R = ifelse(M == 1 & C == 1, 1, 0)) %>%
+#   filter(!(is.na(Ladder) & is.na(LGR.Trap)))
+# 
+# # pull out Chinook and steelhead, try to group by week_num_org to match rest of LGR data
+# trap_mr = filter(trap_mr_org, Species %in% c('Chinook', 'Steelhead')) %>%
+#   mutate(Date = ifelse(!is.na(Ladder), Ladder, LGR.Trap) + origin,
+#          SpawnYear = ifelse(Species == 'Chinook', year(Date),
+#                             ifelse(Date >= ymd(paste0(year(Date), '0701')), year(Date) + 1, year(Date)))) %>%
+#   select(SpawnYear, Year, Date, M:R) %>%
+#   mutate(week_num_org = NA)
+
+
+# for mark-recapture estimate of trap rate, read in data prepped by Rick Orme
+trap_mr_org = read_excel('/Users/kevin/Dropbox/ISEMP/Analysis_Projects/LowerGraniteDam_Escapement/TotalEscapement/Data/LGR PIT obs for trap rate MCR .xlsx', 1) %>%
+  mutate(Species = revalue(Species, c('steelhead' = 'Steelhead')))
+
+# pull out Chinook and steelhead, try to group by week_num_org to match rest of LGR data
+trap_mr = trap_mr_org %>%
+  rename(Date = `Trap date`,
+         M = TRAP,
+         C = LADDER,
+         SpawnYear = `Spawn yr`,
+         Year = `Obs Year YYYY`) %>%
+  mutate(#C = ifelse(ISO == 1 | LADDER == 1, 1, 0),
          R = ifelse(M == 1 & C == 1, 1, 0)) %>%
-  filter(!(is.na(Ladder) & is.na(LGR.Trap)))
+  select(SpawnYear, Year, Date, M, C, R) %>%
+  filter(!is.na(Date)) %>%
+  arrange(Date) %>%
+  mutate(week_num_org = NA)
 
-# break it out by species
-trap_mr_spp = bind_rows(filter(trap_mr_org,
-                              Species == 'Chinook'),
-                       filter(trap_mr_org,
-                              Species == 'Steelhead'))
-trap_mr_other = anti_join(filter(trap_mr_org, Species == 'all') %>%
-                            select(-Species),
-                          select(trap_mr_spp, -Species)) %>%
-  mutate(Species = 'Other')
-
-trap_mr = bind_rows(trap_mr_spp, trap_mr_other) %>%
-  mutate(Date = ifelse(!is.na(Ladder), Ladder, LGR.Trap) + origin) %>%
-  arrange(Date, Species)
-  
-xtabs(~ trap.period + Year, trap_mr)
-
-# pull out Chinook, try to group by week_num to match rest of LGR data
-chnk_mr = filter(trap_mr, Species == 'Chinook') %>%
-  select(Year, Date, M:R) %>%
-  rename(SpawnYear = Year) %>%
-  filter(Date >= ymd(paste0(SpawnYear, '0317')),
-         Date <= ymd(paste0(SpawnYear, '0817')),
-         SpawnYear >= 2010) %>%
-  mutate(week_num = NA)
-
-for(i in 1:nrow(chnk_weeks)) {
-  for(j in 1:ncol(chnk_weeks)) {
-    chnk_mr$week_num[with(chnk_mr, which(SpawnYear == rownames(chnk_weeks)[i] & Date %within% chnk_weeks[i,j]))] = j
-  }
+# assign week number
+for(i in 1:length(week_strata)) {
+  trap_mr$week_num_org[with(trap_mr, which(Date %within% week_strata[i]))] = i
 }
 
-mr_n_fish = group_by(chnk_mr, SpawnYear, week_num) %>%
-  summarise_each(funs(sum), M:R) %>%
-  mutate(trap_period = NA)
-
-# define trap periods as weeks where sum of fish in the trap is >= 10
-i = 1
-while(!is.na(i)) {
-  if(i == 1) mr_n_fish$trap_period[1:which.max(cumsum(mr_n_fish$M) >= 10)] = i
-  start_row = which.max(is.na(mr_n_fish$trap_period))
-  if(i > 1) {
-    if(max(cumsum(mr_n_fish$M[start_row:nrow(mr_n_fish)])) >= 10) mr_n_fish$trap_period[start_row:((start_row-1) + which.max(cumsum(mr_n_fish$M[start_row:nrow(mr_n_fish)]) >= 10))] = i
-    if(max(cumsum(mr_n_fish$M[start_row:nrow(mr_n_fish)])) < 10) mr_n_fish$trap_period[start_row:nrow(mr_n_fish)] = i
-  }
-  i = i + 1
-  if(sum(is.na(mr_n_fish$trap_period)) == 0) i = NA
-}
+# summarise by week
+mr_n_fish = trap_mr %>%
+  group_by(Year, week_num_org) %>%
+  summarise_each(funs(sum), M:R)
 
 # put together list of capture histories
-caphist_list = left_join(chnk_mr, 
-                    select(mr_n_fish, SpawnYear, week_num, trap_period)) %>%
-  dlply(.(trap_period), capHistConvert, cols2use = c('M', 'C', 'R'), in.type = 'individual', out.type = 'frequency')
+caphist_list = dlply(trap_mr, .(week_num_org), capHistConvert, cols2use = c('M', 'C', 'R'), in.type = 'individual', out.type = 'frequency')
 
 # estimate trap rate based on mark-recapture
 trap_rate_mr = ldply(caphist_list, function(x) {
-  mod = closedp.t(x, dfreq=T)
+  mod = try(closedp.t(x, dfreq=T), silent = T)
+  if(class(mod)[1] == 'try-error') return(data.frame(N = NA, N_se = NA, p = NA, p_se = NA))
   mod_N = mod$results['Mt', c('abundance', 'stderr')]
   p_mean = inv.logit(coef(mod$glm[['Mt']])[2:3])
   p_se = deltamethod(list(~ 1 / (1 + exp(-x1)), ~ 1 / (1 + exp(-x2))), mean = coef(mod$glm[['Mt']])[2:3], cov = vcov(mod$glm[['Mt']])[2:3,2:3])
   return(data.frame(N = mod_N[1], N_se = mod_N[2], p = p_mean[1], p_se = p_se[1]))
-}, .id = 'trap_period') %>% tbl_df() %>%
-  left_join(select(mr_n_fish, SpawnYear, week_num, trap_period))
+}, .id = 'week_num_org') %>% tbl_df()
 
-chnk_weekly = filter(lgr_weekly, Species == 'Chinook') %>%
-  left_join(select(trap_rate_mr, SpawnYear, week_num, p, p_se) %>%
-              rename(Rate_MR = p,
-                     Rate_MR_se = p_se))
 
-# pull out steelhead, try to group by week_num to match rest of LGR data
-sthd_mr = filter(trap_mr, Species == 'Steelhead') %>%
-  select(Year, Date, M:R) %>%
-  mutate(SpawnYear = ifelse(Date >= ymd(paste0(Year, '0701')), Year + 1, Year),
-         week_num = NA) %>%
-  select(-Year) %>%
-  select(SpawnYear, Date:R, week_num)
 
-for(i in 1:nrow(sthd_weeks)) {
-  for(j in 1:ncol(sthd_weeks)) {
-    sthd_mr$week_num[with(sthd_mr, which(SpawnYear == rownames(sthd_weeks)[i] & Date %within% sthd_weeks[i,j]))] = j
-  }
-}
-
-mr_n_fish = group_by(sthd_mr, SpawnYear, week_num) %>%
-  summarise_each(funs(sum), M:R) %>%
-  mutate(trap_period = NA)
-
-i = 1
-while(!is.na(i)) {
-  if(i == 1) mr_n_fish$trap_period[1:which.max(cumsum(mr_n_fish$M) >= 10)] = i
-  start_row = which.max(is.na(mr_n_fish$trap_period))
-  if(i > 1) {
-    if(max(cumsum(mr_n_fish$M[start_row:nrow(mr_n_fish)])) >= 10) mr_n_fish$trap_period[start_row:((start_row-1) + which.max(cumsum(mr_n_fish$M[start_row:nrow(mr_n_fish)]) >= 10))] = i
-    if(max(cumsum(mr_n_fish$M[start_row:nrow(mr_n_fish)])) < 10) mr_n_fish$trap_period[start_row:nrow(mr_n_fish)] = i
-  }
-  i = i + 1
-  if(sum(is.na(mr_n_fish$trap_period)) == 0) i = NA
-}
-
-caphist_list = left_join(sthd_mr, 
-                         select(mr_n_fish, SpawnYear, week_num, trap_period)) %>%
-  dlply(.(trap_period), capHistConvert, cols2use = c('M', 'C', 'R'), in.type = 'individual', out.type = 'frequency')
-
-trap_rate_mr = ldply(caphist_list, function(x) {
-  mod = closedp.t(x, dfreq=T)
-  mod_N = mod$results['Mt', c('abundance', 'stderr')]
-  p_mean = inv.logit(coef(mod$glm[['Mt']])[2:3])
-  p_se = deltamethod(list(~ 1 / (1 + exp(-x1)), ~ 1 / (1 + exp(-x2))), mean = coef(mod$glm[['Mt']])[2:3], cov = vcov(mod$glm[['Mt']])[2:3,2:3])
-  return(data.frame(N = mod_N[1], N_se = mod_N[2], p = p_mean[1], p_se = p_se[1]))
-}, .id = 'trap_period') %>% tbl_df() %>%
-  left_join(select(mr_n_fish, SpawnYear, week_num, trap_period))
-
-sthd_weekly = filter(lgr_weekly, Species == 'Steelhead') %>%
-  left_join(select(trap_rate_mr, SpawnYear, week_num, p, p_se) %>%
-              rename(Rate_MR = p,
-                     Rate_MR_se = p_se))
+left_join(mr_n_fish, trap_rate_mr) %>%
+  filter(week_num_org %in% 253:258) %>%
+  select(-(N:N_se)) %>%
+  mutate(p_cv = p_se / p)
 
 #-------------------------------------------------
 # include the mark recapture estimate of trap rate
-lgr_weekly = bind_rows(chnk_weekly, sthd_weekly) %>%
+lgr_weekly %<>%
+  left_join(trap_rate_mr %>%
+              mutate(p_cv = p_se / p) %>%
+              filter(p_cv < 0.7) %>%
+              select(week_num_org, 
+                     Rate_MR = p, 
+                     Rate_MR_se = p_se)) %>%
   mutate(trap_rate = ifelse(!is.na(Rate_MR) & Rate_MR > 0, Rate_MR, RateCalc),
          # trap_rate = RateCalc,
          trap_est = ifelse(!is.na(trap_rate),
@@ -442,9 +377,12 @@ lgr_weekly = bind_rows(chnk_weekly, sthd_weekly) %>%
          Prob_More = pbinom(trap_fish, win_cnt, trap_rate, lower.tail=F),
          lower_trap_lim = qbinom(0.005, win_cnt, trap_rate, lower.tail=T) / trap_rate,
          upper_trap_lim = qbinom(0.995, win_cnt, trap_rate, lower.tail=T) / trap_rate,
-         trap_valid = ifelse(trap_open & lower_trap_lim <= win_cnt & upper_trap_lim >= win_cnt & trap_fish < win_cnt, T, F))
+         trap_valid = ifelse(trap_open & lower_trap_lim <= win_cnt & upper_trap_lim >= win_cnt & trap_fish < win_cnt, T, F),
+         trap_valid = ifelse(trap_fish < 10, F, trap_valid),
+         trap_valid = ifelse(abs(trap_est - win_cnt) / win_cnt > 10, F, trap_valid))
 
 # look at trap rate
+spp = c('Chinook', 'Steelhead')[1]
 lgr_weekly %>%
   filter(Species == spp) %>%
   select(SpawnYear, trap_open, trap_valid, week_num, Rate, ActualRateInclusiveTime, RateCalc, Rate_MR, Rate_MR_se) %>%
@@ -466,14 +404,18 @@ lgr_weekly %>%
 
 
 # compare window counts and trap rates now
-spp = c('Chinook', 'Steelhead')[2]
-filter(lgr_weekly, Species == spp) %>%
-  filter(trap_est < 1e13) %>%
+spp = c('Chinook', 'Steelhead')[1]
+lgr_weekly %>%
+  filter(Species == spp) %>%
+  # filter(trap_est < 1e13) %>%
   ggplot(aes(x = win_cnt, y = trap_est, color = as.factor(SpawnYear), fill = as.factor(SpawnYear))) +
   geom_point(aes(shape = trap_valid)) +
   scale_shape_manual(values = c('TRUE' = 19, 'FALSE' = 1)) +
   geom_abline(intercept = 0, slope = 1, lty = 2) +
-  geom_smooth(method = lm, formula = y ~ -1 + x, fullrange = T) +
+  geom_smooth(data = lgr_weekly %>%
+                filter(Species == spp,
+                       trap_valid),
+              method = lm, formula = y ~ -1 + x, fullrange = T) +
   facet_wrap(~ SpawnYear, scales = 'free') +
   labs(x = 'Window', y = 'Trap', color = 'Spawn Year', fill = 'Spawn Year', shape = 'Trap Valid',
        title = spp) +
@@ -481,8 +423,7 @@ filter(lgr_weekly, Species == spp) %>%
   theme(title = element_text(size = 20))
 
 filter(lgr_weekly,
-       Species == spp,
-       trap_est < 1e12) %>%
+       Species == spp) %>%
   select(SpawnYear, window_open, trap_open, trap_valid, week_num, win_cnt, trap_est) %>%
   gather(Method, Estimate, -(SpawnYear:week_num)) %>%
   mutate(Method = revalue(Method, c('win_cnt' = 'Window', 'trap_est' = 'Trap')),
@@ -499,8 +440,7 @@ filter(lgr_weekly,
   labs(x = 'Week', title = spp, color = 'Source', shape = 'Trap Valid')
 
 filter(lgr_weekly,
-       Species == spp,
-       trap_est < 1e12) %>%
+       Species == spp) %>%
   select(SpawnYear, trap_open, win_cnt, week_num, Rate, RateCalc, Rate_MR, Rate_MR_se) %>%
   arrange(SpawnYear, week_num) %>%
   filter(!is.na(Rate_MR)) %>%
@@ -556,7 +496,7 @@ night_passage = night_data[17:21, 7:9] %>%
 
 #------------------------------------------
 # save compiled data
-save(lgr_weekly, night_passage, file = 'DataPrepped.rda')
+save(lgr_weekly, night_passage, week_strata, file = 'DataPrepped.rda')
 
 #------------------------------------------
 # compile everything into a list to pass to JAGS
