@@ -1,13 +1,14 @@
 # Author: Kevin See
 # Purpose: pull together window counts and trap data from Lower Granite dam, queried by DART (http://www.cbr.washington.edu/dart)
 # Created: 2/23/2016
-# Last Modified: 2/25/2016
+# Last Modified: 3/22/2016
 # Notes: 
 # Window counts: http://www.cbr.washington.edu/dart/query/adult_daily
 # Trap sample rates: http://www.cbr.washington.edu/dart/query/pitadult_valid - Sample Time/Rates
 # Details about night passage and re-ascension fish: http://www.cbr.washington.edu/dart/query/pit_adult_window - Detection Details by TagID
 # All fish in LGR trap: http://www.cbr.washington.edu/dart/query/pitadult_valid - Valid List - All in Trap Detail
-# OR use the data directly from LGR trap database - provided by IDFG
+# OR use the data directly from LGR trap database - provided by IDFG (downloaded 3/8/16)
+# Rick Orme prepared mark-recapture data to estimate trap rate
 
 #--------------------------------------------------------
 library(plyr)
@@ -138,7 +139,7 @@ ggplot(lgr_night_reasc_weekly, aes(x = reascent_tags / tot_tags, y = reascent_ta
 
 #--------------------------------------------------------
 # pull trap data directly from IDFG trap database
-pbt.db.date = '20151018'
+pbt.db.date = '20160308'
 
 lgr_trap = read.csv(paste0('Data/IDFG/tblLGDMasterCombineExportJodyW_', pbt.db.date, '.csv')) %>% tbl_df() %>%
   rename(Tag.ID = LGDNumPIT) %>%
@@ -262,60 +263,37 @@ filter(lgr_weekly, trap_est < 50000) %>%
   geom_point() +
   geom_abline(intercept = 0, slope = 1, lty = 2) +
   geom_smooth(method = lm, formula = y ~ -1 + x, fullrange = T) +
-  facet_grid(SpawnYear ~ Species, scales = 'free') +
+  # facet_grid(SpawnYear ~ Species, scales = 'free') +
+  facet_grid(Species ~ SpawnYear, scales = 'free') +
+  scale_color_brewer(palette = 'Set1') +
+  scale_fill_brewer(palette = 'Set1') +
   labs(x = 'Window', y = 'Trap', color = 'Spawn Year', fill = 'Spawn Year') +
   theme_bw()
 
-# look at trap rate
-spp = c('Chinook', 'Steelhead')[1]
-filter(lgr_weekly,
-       Species == spp) %>%
-  select(SpawnYear, week_num, matches('Rate')) %>%
-  gather(Method, Estimate, -(SpawnYear:week_num)) %>%
-  mutate(Method = revalue(Method, c('Rate' = 'Set Rate', 'RateCalc' = 'Obs. Rate'))) %>%
-  arrange(SpawnYear, week_num, Method) %>%
-  ggplot(aes(x = week_num, y = Estimate, color = Method)) +
-  geom_line() +
-  geom_point() +
-  facet_wrap(~ SpawnYear)
-
-
 #--------------------------------------------------------
 # for mark-recapture estimate of trap rate, read in data prepped by Rick Orme
-# trap_mr_org = read.csv('Data/PIT tag based LGR trap rate.csv') %>% tbl_df() %>%
-#   rename(Species = species) %>%
-#   mutate(Ladder = mdy(Ladder),
-#          LGR.Trap = mdy(LGR.Trap),
-#          Year = ifelse(!is.na(Ladder), year(Ladder), year(LGR.Trap)),
-#          M = ifelse(is.na(LGR.Trap), 0, 1),
-#          C = ifelse(is.na(Ladder), 0, 1),
-#          R = ifelse(M == 1 & C == 1, 1, 0)) %>%
-#   filter(!(is.na(Ladder) & is.na(LGR.Trap)))
-# 
-# # pull out Chinook and steelhead, try to group by week_num_org to match rest of LGR data
-# trap_mr = filter(trap_mr_org, Species %in% c('Chinook', 'Steelhead')) %>%
-#   mutate(Date = ifelse(!is.na(Ladder), Ladder, LGR.Trap) + origin,
-#          SpawnYear = ifelse(Species == 'Chinook', year(Date),
-#                             ifelse(Date >= ymd(paste0(year(Date), '0701')), year(Date) + 1, year(Date)))) %>%
-#   select(SpawnYear, Year, Date, M:R) %>%
-#   mutate(week_num_org = NA)
-
-
-# for mark-recapture estimate of trap rate, read in data prepped by Rick Orme
-trap_mr_org = read_excel('/Users/kevin/Dropbox/ISEMP/Analysis_Projects/LowerGraniteDam_Escapement/TotalEscapement/Data/LGR PIT obs for trap rate MCR .xlsx', 1) %>%
+trap_mr_org = read_excel('/Users/kevin/Dropbox/ISEMP/Analysis_Projects/LowerGraniteDam_Escapement/TotalEscapement/Data/LGR PIT obs for trap rate MCR 3-17-16 .xlsx', 
+                         1, 
+                         skip = 5) %>%
   mutate(Species = revalue(Species, c('steelhead' = 'Steelhead')))
 
 # pull out Chinook and steelhead, try to group by week_num_org to match rest of LGR data
 trap_mr = trap_mr_org %>%
   rename(Date = `Trap date`,
-         M = TRAP,
-         C = LADDER,
+         M = `TRAP adj dn time`,
+         C = `LAD adj dn time`,
          SpawnYear = `Spawn yr`,
-         Year = `Obs Year YYYY`) %>%
-  mutate(#C = ifelse(ISO == 1 | LADDER == 1, 1, 0),
-         R = ifelse(M == 1 & C == 1, 1, 0)) %>%
-  select(SpawnYear, Year, Date, M, C, R) %>%
-  filter(!is.na(Date)) %>%
+         Year = `Obs Year YYYY`,
+         Tag_Code = `Tag Code`,
+         tag_yr = `unique tag-year`,
+         rear_type = `rear type`,
+         SRR = `SRR Code`,
+         StartDate = `sample week min date`,
+         week_num_org2 = `both spec. samp Week`) %>%
+  mutate(R = ifelse(M == 1 & C == 1, 1, 0)) %>%
+  select(SpawnYear, Year, Tag_Code, rear_type, SRR, Date, M, C, R) %>%
+  filter(!is.na(Date),
+         !is.na(M)) %>%
   arrange(Date) %>%
   mutate(week_num_org = NA)
 
@@ -345,9 +323,10 @@ trap_rate_mr = ldply(caphist_list, function(x) {
 
 
 left_join(mr_n_fish, trap_rate_mr) %>%
-  filter(week_num_org %in% 253:258) %>%
+  # filter(week_num_org %in% 253:258) %>%
   select(-(N:N_se)) %>%
-  mutate(p_cv = p_se / p)
+  mutate(p_cv = p_se / p) %>%
+  filter(p_cv > 0.5)
 
 #-------------------------------------------------
 # include the mark recapture estimate of trap rate
@@ -385,21 +364,21 @@ lgr_weekly %<>%
 spp = c('Chinook', 'Steelhead')[1]
 lgr_weekly %>%
   filter(Species == spp) %>%
-  select(SpawnYear, trap_open, trap_valid, week_num, Rate, ActualRateInclusiveTime, RateCalc, Rate_MR, Rate_MR_se) %>%
+  select(SpawnYear, trap_open, trap_valid, Start_Date, week_num, Rate, ActualRateInclusiveTime, RateCalc, Rate_MR, Rate_MR_se) %>%
   gather(Method, Estimate, -(SpawnYear:week_num), -Rate_MR_se) %>%
   mutate(Method = revalue(Method, c('Rate' = 'Set Rate', 'ActualRateInclusiveTime' = 'Naive Calc. Rate', 'RateCalc' = 'Obs. Trap Rate', 'Rate_MR' = 'M-R Rate'))) %>%
   rename(Rate_se = Rate_MR_se,
          Trap_Open = trap_open) %>%
   mutate(Rate_se = ifelse(Method == 'M-R Rate', Rate_se, NA)) %>%
   arrange(SpawnYear, week_num, Method) %>%
-  ggplot(aes(x = week_num, y = Estimate, color = Method)) +
+  ggplot(aes(x = Start_Date, y = Estimate, color = Method)) +
   geom_line() +
   # geom_point(aes(shape = Trap_Open)) +
   geom_point(aes(shape = trap_valid)) +
   scale_shape_manual(values = c('TRUE' = 19, 'FALSE' = 1)) +
   geom_errorbar(aes(ymin = Estimate + qnorm(0.025) * Rate_se,
                     ymax = Estimate + qnorm(0.975) * Rate_se)) +
-  facet_wrap(~ SpawnYear) +
+  facet_wrap(~ SpawnYear, scales = 'free_x') +
   theme_bw()
 
 

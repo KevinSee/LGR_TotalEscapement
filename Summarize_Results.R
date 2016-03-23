@@ -1,9 +1,10 @@
 # Author: Kevin See
 # Purpose: Examine results of total adult escapement model over Lower Granite dam 
 # Created: 2/19/2015
-# Last Modified: 2/25/2016
+# Last Modified: 3/22/2016
 
-library(R2jags)
+# library(R2jags)
+library(jagsUI)
 library(ggplot2)
 library(gridExtra)
 library(dclone)
@@ -54,27 +55,27 @@ names(jags_data_list)
 i = 5
 load(paste('ModelFits/LGD_', gsub('\\.', '_', names(jags_data_list)[i]), '.rda', sep=''))
 
-my_ggs = ggs(as.mcmc(adult.pass.mod), family = c('X.sig'))
-my_ggs = ggs(as.mcmc(adult.pass.mod), family = c('X.tot'))
-my_ggs = ggs(as.mcmc(adult.pass.mod), family = c('trap.rate.true'))
-my_ggs = ggs(as.mcmc(adult.pass.mod), family = c('reasc.avg'))
-my_ggs = ggs(as.mcmc(adult.pass.mod), family = c('reasc.true'))
-my_ggs = ggs(as.mcmc(adult.pass.mod), family = c('win.prop.avg'))
-my_ggs = ggs(as.mcmc(adult.pass.mod), family = c('win.prop.true'))
-my_ggs = ggs(as.mcmc(adult.pass.mod), family = c('win.prop.sigma'))
-my_ggs = ggs(as.mcmc(adult.pass.mod), family = c('wnc.avg'),
+my_ggs = ggs(adult.pass.mod$samples, family = c('X.sig'))
+my_ggs = ggs(adult.pass.mod$samples, family = c('X.tot'))
+my_ggs = ggs(adult.pass.mod$samples, family = c('trap.rate.true'))
+my_ggs = ggs(adult.pass.mod$samples, family = c('reasc.avg'))
+my_ggs = ggs(adult.pass.mod$samples, family = c('reasc.true'))
+my_ggs = ggs(adult.pass.mod$samples, family = c('win.prop.avg'))
+my_ggs = ggs(adult.pass.mod$samples, family = c('win.prop.true'))
+my_ggs = ggs(adult.pass.mod$samples, family = c('win.prop.sigma'))
+my_ggs = ggs(adult.pass.mod$samples, family = c('wnc.avg'),
              par_labels = data.frame(Parameter = paste0('wnc.avg[', 1:2, ']'),
                                      Label = c('Perc Wild Morph', 'Perc Wild PBT')))
-my_ggs = ggs(as.mcmc(adult.pass.mod), family = c('wnc.true'),
+my_ggs = ggs(adult.pass.mod$samples, family = c('wnc.true'),
              par_labels = data.frame(Parameter = paste0('wnc.true[', 1:2, ']'),
                                      Label = c('Perc Wild Morph', 'Perc Wild PBT')))
 
-my_ggs = ggs(as.mcmc(adult.pass.mod), family = c('acf'),
+my_ggs = ggs(adult.pass.mod$samples, family = c('acf'),
              par_labels = data.frame(Parameter = paste0('acf[', 1:4, ']'),
                                      Label = c('Day Rate', 'Re-Ascen Rate', 'Wild Rate (Morph)', 'Wild Rate (PBT)')))
-my_ggs = ggs(as.mcmc(adult.pass.mod), family = c('sigma'))
-my_ggs = ggs(as.mcmc(adult.pass.mod), family = c('trap.bump'))
-my_ggs = ggs(as.mcmc(adult.pass.mod), family = c('^r$'))
+my_ggs = ggs(adult.pass.mod$samples, family = c('sigma'))
+my_ggs = ggs(adult.pass.mod$samples, family = c('trap.bump'))
+my_ggs = ggs(adult.pass.mod$samples, family = c('^r$'))
 
 ggs_density(my_ggs) +
   facet_wrap(~ Parameter, scales = 'free')
@@ -99,7 +100,7 @@ other_post_list = week_post_list = tot_post_list
 
 for(i in 1:length(jags_data_list)) {
   load(paste('ModelFits/LGD_', gsub('\\.', '_', names(jags_data_list)[i]), '.rda', sep=''))
-  attach.jags(adult.pass.mod)
+  attach(adult.pass.mod$sims.list)
   tot_post_list[[i]] = ldply(list('All.Fish' = X.tot.all, 
                                   'All.Wild.Fish.Morph' = X.tot.all.wild.morph, 
                                   'All.Wild.Fish.PBT' = X.tot.all.wild.pbt, 
@@ -112,7 +113,9 @@ for(i in 1:length(jags_data_list)) {
                                   'Wild.Reascents.Morph' = X.tot.reasc.wild.morph, 
                                   'Wild.Reascents.PBT'= X.tot.reasc.wild.pbt), 
                              .id='Variable') %>% tbl_df() %>%
-    rename(value = `1`)
+    gather(iteration, value, -Variable) %>%
+    mutate(iteration = gsub('^V', '', iteration),
+           iteration = as.integer(iteration))
   
   other_post_list[[i]] = ldply(list('Tot.Rand.Walk.SD' = X.sigma,
                                     'Avg.Day' = win.prop.avg,
@@ -128,7 +131,9 @@ for(i in 1:length(jags_data_list)) {
                                     # 'Trap.Bump' = trap.bump,
                                     'Over.Dispersion' = r),
                                .id = 'Variable') %>% tbl_df() %>%
-    rename(value = `1`)
+    gather(iteration, value, -Variable) %>%
+    mutate(iteration = gsub('^V', '', iteration),
+           iteration = as.integer(iteration))
   
   week_post_list[[i]] = ldply(list('New.Wild.Fish.PBT' = X.new.wild.pbt, 
                                    'All.Wild.Fish.PBT' = X.all.wild.pbt, 
@@ -146,7 +151,7 @@ for(i in 1:length(jags_data_list)) {
                                    'Wild.PBT.Rate' = wnc.true[,,2]), 
                               .id='Variable') %>% tbl_df() %>%
     gather(week_num, value, -Variable)
-  detach.jags()
+  detach(adult.pass.mod$sims.list)
 }
 
 tot_post = ldply(tot_post_list, .id = 'Model') %>% tbl_df() %>%
@@ -292,7 +297,6 @@ plot_df %>%
               slope = 1,
               lty = 2,
               color = 'red') +
-  
   geom_smooth(method = lm,
               formula = y ~ -1 + x,
               fullrange = T) +
@@ -349,6 +353,7 @@ plot_df %>%
          Variable %in% c('Wild.Morph.Rate', 'Wild.PBT.Rate')) %>%
   mutate(wild_rate_morph = Wild.morph / trap_fish,
          wild_rate_pbt = Wild.PBT / trap_fish) %>%
+  mutate(trap_valid = ifelse(is.na(trap_valid), F, trap_valid)) %>%
   ggplot(aes(x = week_num, y = mean, color = Variable)) +
   geom_ribbon(aes(ymin = low_ci, ymax = upp_ci, group = Variable, fill = Variable), color = NA, alpha = 0.4) +
   geom_hline(data = filter(other_summ, 
@@ -357,18 +362,24 @@ plot_df %>%
                select(Year, median),
              aes(yintercept =  median), lty = 2, col = 'darkgreen') +
   geom_line(aes(group = Variable)) +
-  geom_point(aes(group = Variable, size = win_cnt), position = position_dodge(width = 0.90)) +
+  # geom_point(aes(group = Variable, size = win_cnt), position = position_dodge(width = 0.90)) +
+  geom_point(aes(group = Variable, size = trap_fish), position = position_dodge(width = 0.90)) +
   scale_color_manual(values = c('Wild.Morph.Rate' = 'blue4', 'Wild.PBT.Rate' = 'red'),
                      labels = c('Wild.Morph.Rate' = 'Morph', 'Wild.PBT.Rate' = 'PBT')) +
   scale_fill_manual(values = c('Wild.Morph.Rate' = 'lightskyblue', 'Wild.PBT.Rate' = 'mistyrose2'),
                     labels = c('Wild.Morph.Rate' = 'Morph', 'Wild.PBT.Rate' = 'PBT')) +
-  geom_line(aes(y = wild_rate_morph), color = 'blue') +
-  geom_point(aes(y = wild_rate_morph, size = win_cnt), color = 'blue') +
-  geom_line(aes(y = wild_rate_pbt), color = 'hotpink') +
-  geom_point(aes(y = wild_rate_pbt, size = win_cnt), color = 'hotpink') +
+  geom_rug(aes(linetype = trap_open),
+           sides = 't',
+           color = 'black') +
+  scale_linetype_manual(values = c('TRUE' = 1, 'FALSE' = 0),
+                        name = 'Trap Open') +
   theme_bw() +
   facet_wrap(~ Year) +
-  labs(x = 'Week', y = 'Rate', title = paste('Rate of Wild Fish -', spp), size = 'Window Count')
+  labs(x = 'Week', 
+       y = 'Rate', 
+       # size = 'Window Count',
+       size = 'Fish in Trap',
+       title = paste('Rate of Wild Fish -', spp))
 
 # look at daytime passage rate
 plot_df %>%
@@ -550,7 +561,7 @@ plot_df %>%
   full_join(lgr_weekly %>%
               filter(Species == spp) %>%
               select(Species, Year = SpawnYear, week_num, Start_Date, win_cnt, trap_est, trap_valid)) %>%
-  ggplot(aes(x = week_num)) +
+  ggplot(aes(x = Start_Date)) +
   geom_ribbon(aes(ymin = ReAsc_lowCI,
                   ymax = ReAsc_uppCI,
                   fill = 'reasc'), 
@@ -573,40 +584,79 @@ plot_df %>%
                      labels = c('reasc' = 'Re-Ascension',
                                 'night' = 'Night Passage'),
                      name = 'Variable') +
-  facet_wrap(~ Year, scales = 'free') +
+  facet_wrap(~ Year, scales = 'free_x') +
   labs(x = 'Week',
        y = 'Fish',
        title = paste('Night-passage & Re-ascension - Wild', spp))
 
-# difference between model estimate and window count / trap estimate, by week
 plot_df %>%
-  filter(Species == spp) %>%
-  filter(Variable == 'All.Fish') %>%
+  filter(Species == spp,
+         Variable == 'Wild.Reascents') %>%
+  select(Species:week_num, Start_Date, ReAsc = median, ReAsc_lowCI = low_ci, ReAsc_uppCI = upp_ci) %>%
+  full_join(plot_df %>%
+              filter(Species == spp,
+                     Variable == 'Night.Wild.Fish') %>%
+              select(Species:week_num, Start_Date, Night = median, Night_lowCI = low_ci, Night_uppCI = upp_ci)) %>%
+  full_join(lgr_weekly %>%
+              filter(Species == spp) %>%
+              select(Species, Year = SpawnYear, week_num, Start_Date, win_cnt, trap_est, trap_valid)) %>%
   ggplot(aes(x = Start_Date)) +
-  geom_ribbon(aes(ymin = low_ci - win_cnt,
-                  ymax = upp_ci - win_cnt,
-                  fill = 'Window'),
-              alpha = 0.5) +
-  geom_ribbon(aes(ymin = low_ci - trap_est,
-                  ymax = upp_ci - trap_est,
-                  fill = 'Trap'),
-              alpha = 0.5) +
-  geom_line(aes(y = median - win_cnt,
-                color = 'Window')) +
-  geom_line(aes(y = median - trap_est,
-                color = 'Trap')) +
+  geom_ribbon(aes(ymin = Night_lowCI - ReAsc_lowCI,
+                  ymax = Night_uppCI - ReAsc_uppCI),
+              fill = 'gray',
+              alpha = 0.3) +
+  geom_line(aes(y = Night - ReAsc)) +
   geom_hline(yintercept = 0,
+             color = 'red',
              lty = 2) +
-  scale_fill_manual(name = 'Source',
-                    values = c('Window' = 'lightblue',
-                               'Trap' = 'pink')) +
-  scale_color_manual(name = 'Source',
-                     values = c('Window' = 'blue',
-                                'Trap' = 'red')) +
-  facet_wrap(~ Year, scales = 'free') +
-  labs(x = 'Date',
-       y = 'Model - Data',
-       title = paste('Difference Between Model and Window Counts / Trap Estimates\nFor', spp))
+  facet_wrap(~ Year, scales = 'free_x') +
+  labs(x = 'Week',
+       y = 'Night-passage - Re-ascenscion',
+       title = paste('Difference between Night-passage and Re-ascension\nWild', spp))
+
+
+
+
+# difference between model estimate and window count / trap estimate, by week
+diff_p = vector('list', 2)
+names(diff_p) = c('Chinook', 'Steelhead')
+for(spp in names(diff_p)) {
+  diff_p[[spp]] = plot_df %>%
+    filter(Species == spp) %>%
+    filter(Variable == 'All.Fish') %>%
+    ggplot(aes(x = Start_Date)) +
+    geom_ribbon(aes(ymin = low_ci - win_cnt,
+                    ymax = upp_ci - win_cnt,
+                    fill = 'Window'),
+                alpha = 0.5) +
+    geom_ribbon(aes(ymin = low_ci - trap_est,
+                    ymax = upp_ci - trap_est,
+                    fill = 'Trap'),
+                alpha = 0.5) +
+    geom_line(aes(y = median - win_cnt,
+                  color = 'Window')) +
+    geom_line(aes(y = median - trap_est,
+                  color = 'Trap')) +
+    geom_hline(yintercept = 0,
+               lty = 2) +
+    scale_fill_manual(name = 'Source',
+                      values = c('Window' = 'lightblue',
+                                 'Trap' = 'pink')) +
+    scale_color_manual(name = 'Source',
+                       values = c('Window' = 'blue',
+                                  'Trap' = 'red')) +
+    facet_wrap(~ Year, scales = 'free_x') +
+    labs(x = 'Date',
+         y = 'Model - Data',
+         title = paste('Difference Between Model and Window Counts / Trap Estimates\nFor', spp))
+}
+
+all_diff_p = arrangeGrob(diff_p[[1]], diff_p[[2]], ncol = 1)
+ggsave('Figures/Model_Data_Differences.pdf',
+       all_diff_p,
+       width = 9,
+       height = 11,
+       units = 'in')
 
 #----------------------------------------------------------------------
 # add IDFG estimates for comparison
@@ -720,32 +770,30 @@ idfg_isemp_p = tot_comp %>%
   stat_summary(fun.y=median, geom='point', pch=1, position=position_dodge(width=pos_dodge)) +
   stat_summary(fun.y=mean, geom='point', pch=4, position=position_dodge(width=pos_dodge)) +
   scale_fill_brewer(palette='Paired', name='Estimate', labels=paste(rep(2010:2015, each=2), c('IDFG', 'ISEMP')), guide=guide_legend(nrow=2)) +
-  geom_point(data = lgr_weekly %>%
-               mutate(trap_rate = ifelse(trap_rate < 1e-12, NA, trap_rate)) %>%
-               group_by(Species, Year = SpawnYear) %>%
-               summarise(win_Wild_Morph = round(sum(win_cnt * (Wild.morph / trap_fish), na.rm=T)),
-                         win_Wild_PBT = round(sum(win_cnt * (Wild.PBT / trap_fish), na.rm=T)),
-                         trap_Wild_Morph = round(sum(Wild.morph / trap_rate, na.rm=T)),
-                         trap_Wild_PBT = round(sum(Wild.PBT / trap_rate, na.rm=T))) %>%
-               select(Species:Year, everything()) %>%
-               gather(Source, estimate, -(Species:Year)) %>%
-               mutate(Type = ifelse(grepl('PBT', Source), 'PBT', 'Morph')) %>%
-               mutate(Source = gsub('_Wild_PBT', '', gsub('_Wild_Morph', '', Source)),
-                      Source = revalue(Source, c('win' = 'Window', 'trap' = 'Trap'))) %>%
-               filter(Type == 'PBT') %>%
-               mutate(yr_grp = NA),
-             aes(x = Year, 
-                 y = estimate,
-                 shape = Source),
-             size = 5,
-             color = 'darkred') +
-  scale_shape_manual(values = c('Window' = 4,
-                                'Trap' = 8)) +
+#   geom_point(data = lgr_weekly %>%
+#                mutate(trap_rate = ifelse(trap_rate < 1e-12, NA, trap_rate)) %>%
+#                group_by(Species, Year = SpawnYear) %>%
+#                summarise(win_Wild_Morph = round(sum(win_cnt * (Wild.morph / trap_fish), na.rm=T)),
+#                          win_Wild_PBT = round(sum(win_cnt * (Wild.PBT / trap_fish), na.rm=T)),
+#                          trap_Wild_Morph = round(sum(Wild.morph / trap_rate, na.rm=T)),
+#                          trap_Wild_PBT = round(sum(Wild.PBT / trap_rate, na.rm=T))) %>%
+#                select(Species:Year, everything()) %>%
+#                gather(Source, estimate, -(Species:Year)) %>%
+#                mutate(Type = ifelse(grepl('PBT', Source), 'PBT', 'Morph')) %>%
+#                mutate(Source = gsub('_Wild_PBT', '', gsub('_Wild_Morph', '', Source)),
+#                       Source = revalue(Source, c('win' = 'Window', 'trap' = 'Trap'))) %>%
+#                filter(Type == 'PBT') %>%
+#                mutate(yr_grp = NA),
+#              aes(x = Year, 
+#                  y = estimate,
+#                  shape = Source),
+#              size = 6) +
+#   scale_shape_manual(values = c('Window' = 19,
+#                                 'Trap' = 17)) +
   facet_wrap(~ Species, scales = 'free') +
-  # facet_grid(Species ~ Type, scales = 'free') +
   theme_bw() +
   theme(legend.position='bottom', axis.text.x = element_text(size=7)) +
-  labs(title='Total Escapement over Lower Granite Dam', y='Wild Fish', x='Run Year')
+  labs(title='Total Wild (PBT) Escapement over Lower Granite Dam', y='Wild Fish', x='Run Year')
 idfg_isemp_p
 
 ggsave('Figures/IDFG_ISEMP_comparison.pdf',
@@ -769,7 +817,7 @@ lgr_weekly %>%
               summarise(IDFG_tot_win = sum(estimate))) %>%
   mutate(diff = ISEMP_tot_win - IDFG_tot_win)
 
-tot_post %>%
+isemp_est_p = tot_post %>%
   filter(Variable == 'All.Fish') %>%
   mutate(Year = as.factor(as.character(Year))) %>%
   ggplot(aes(x = Year, y = value, fill = Year)) +
@@ -786,12 +834,22 @@ tot_post %>%
                mutate(Year = as.factor(as.character(Year))) %>%
                gather(Source, value, -(Species:Year)),
              aes(shape = Source),
-             size = 6) +
+             size = 5) +
   scale_shape_manual(values = c('ISEMP_tot_win' = 19,
                                 'ISEMP_tot_trap' = 17),
                      labels = c('ISEMP_tot_win' = 'Window',
                                 'ISEMP_tot_trap' = 'Trap')) +
-  facet_wrap(~ Species, scales = 'free')
+  facet_wrap(~ Species, scales = 'free') +
+  labs(y = 'Total Fish',
+       title = 'Total Escapement over Lower Granite Dam')
+isemp_est_p
+
+ggsave('Figures/ISEMP_Total_Escapement.pdf',
+       isemp_est_p,
+       width = 9,
+       height = 6,
+       units = 'in')
+
 
 # example plot
 ex_plot_df = tot_post %>%

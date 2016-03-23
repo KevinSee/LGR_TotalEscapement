@@ -1,10 +1,12 @@
 # Author: Kevin See
 # Purpose: this R script estimates adult Chinook and steelhead LGR passage by week based on both window counts and counts in a fish trap in the ladder
 # Created: 2/19/2015
-# Last Modified: 2/24/2016
+# Last Modified: 3/22/2016
 # Notes: It is run on a weekly time-step
 
-library(R2jags)
+# library(runjags)
+# library(R2jags)
+library(jagsUI)
 
 #-----------------------------------------------------------------
 # load the data for all years
@@ -19,13 +21,13 @@ if(!file.exists('ModelFits')) dir.create(file.path(getwd(), 'ModelFits'))
 # set mcmc parameters
 #-----------------------------------------------------------------
 # number of total samples
-mcmc.chainLength = as.integer(40000) 
+mcmc.chainLength = 12000 #40000
 
 # number of burn-in samples
-mcmc.burn = as.integer (10000)
+mcmc.burn = 2000 #10000
 
 # thinning interval
-mcmc.thin = 30
+mcmc.thin = 20 #30
 
 # number of MCMC chains
 mcmc.chains = 4
@@ -53,6 +55,7 @@ jags.inits = function(){
 
 set.seed(17)
 for(i in 1:length(jags_data_list)) {
+# for(i in c(6, 12)) {
   cat(paste('Starting', names(jags_data_list)[i], 'run \n'))
   
   # pull out data for JAGS, and data for plotting later
@@ -67,9 +70,10 @@ for(i in 1:length(jags_data_list)) {
                             n.burnin = mcmc.burn, 
                             n.thin = mcmc.thin, 
                             n.iter = mcmc.chainLength, 
+                            parallel = T,
                             DIC = FALSE))
   proc.time() - ptm # returns the CPU time used
-  if(class(adult.pass.mod)=='try-error') {
+  if(class(adult.pass.mod) == 'try-error') {
     cat(paste('Error with', names(jags_data_list)[i], 'run. \n'))
     rm(adult.pass.mod, jags.data, ptm)
     next
