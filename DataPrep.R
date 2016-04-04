@@ -39,8 +39,23 @@ wind_cnts = read.csv('Data/WindowCounts/adultdaily_1444247382_835.csv') %>%
 
 #--------------------------------------------------------
 # for dividing by weeks
-n_wks_tot = as.numeric(difftime(max(wind_cnts$Date), min(wind_cnts$Date), units = 'weeks'))
-week_strata = interval(ymd('20090701') + weeks(0:n_wks_tot), ymd('20090701') + weeks(1:(n_wks_tot + 1)) - eseconds(1))
+for(yr in unique(year(wind_cnts$Date))) {
+  if(yr == 2009) strata_dates = data.frame(start_date = ymd(paste0(yr, '0701')) + weeks(0:51)) %>%
+      mutate(end_date = start_date + days(7) - eseconds(1))
+  if(yr > 2009) strata_dates = strata_dates %>%
+      bind_rows(data.frame(start_date = ymd(paste0(yr, '0701')) + weeks(0:51)) %>%
+                  mutate(end_date = start_date + days(7) - eseconds(1)))
+}
+
+strata_df = strata_dates %>%
+  filter(!(month(end_date) == 6 & mday(end_date) > 23)) %>%
+  bind_rows(strata_dates %>%
+              filter(month(end_date) == 6,
+                     mday(end_date) > 23) %>%
+              mutate(end_date = ymd(paste0(year(start_date), '0701')) - eseconds(1))) %>%
+  arrange(start_date)
+
+week_strata = interval(strata_df$start_date, strata_df$end_date)
 
 #--------------------------------------------------------
 # pull together all trap rates from DART
@@ -108,7 +123,7 @@ lgr_night_reasc_daily = select(lgr_details,
             day_tags_W = length(unique(TagID[Period=='D' & Rear.Type == 'W'])),
             reascent_tags_W = length(unique(TagID[ReAscent & Rear.Type == 'W']))) %>%
   ungroup() %>%
-  filter(SpawnYear >= 2010, SpawnYear <= 2015) %>%
+  filter(SpawnYear >= 2010, SpawnYear <= max(SpawnYear[Species == 'Chinook'])) %>%
   mutate(week_num_org = NA)
 
 # assign week numbers to each day
@@ -258,17 +273,23 @@ identical(group_by(lgr_weekly, Species, SpawnYear) %>%
 
 
 # compare trap estimates and window counts
-filter(lgr_weekly, trap_est < 50000) %>%
+lgr_weekly %>%
   ggplot(aes(x = win_cnt, y = trap_est, color = as.factor(SpawnYear), fill = as.factor(SpawnYear))) +
   geom_point() +
   geom_abline(intercept = 0, slope = 1, lty = 2) +
   geom_smooth(method = lm, formula = y ~ -1 + x, fullrange = T) +
   # facet_grid(SpawnYear ~ Species, scales = 'free') +
-  facet_grid(Species ~ SpawnYear, scales = 'free') +
-  scale_color_brewer(palette = 'Set1') +
-  scale_fill_brewer(palette = 'Set1') +
-  labs(x = 'Window', y = 'Trap', color = 'Spawn Year', fill = 'Spawn Year') +
-  theme_bw()
+  # facet_grid(Species ~ SpawnYear, scales = 'free') +
+  facet_wrap(~ Species + SpawnYear, scales = 'free', nrow = 2) +
+  scale_color_brewer(palette = 'Dark2') +
+  scale_fill_brewer(palette = 'Dark2') +
+  labs(x = 'Window Count', 
+       y = 'Trap Estimate', 
+       color = 'Spawn Year', 
+       fill = 'Spawn Year',
+       title = 'All Chinook and Unclipped Steelhead') +
+  theme_bw() +
+  theme(legend.position = 'bottom')
 
 #--------------------------------------------------------
 # for mark-recapture estimate of trap rate, read in data prepped by Rick Orme
@@ -383,7 +404,7 @@ lgr_weekly %>%
 
 
 # compare window counts and trap rates now
-spp = c('Chinook', 'Steelhead')[1]
+spp = c('Chinook', 'Steelhead')[2]
 lgr_weekly %>%
   filter(Species == spp) %>%
   # filter(trap_est < 1e13) %>%
