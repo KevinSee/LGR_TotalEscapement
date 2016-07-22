@@ -6,5 +6,6 @@ JAGS_DataList.rda
 ModelFits
 Figures
 IDFG_Comparison
-IDFG_Comoparison.R
 Outgoing
+B_run_steelhead
+Escapement_AllYrs_NIMBLE.R

@@ -1,7 +1,7 @@
 # Author: Kevin See
 # Purpose: pull together window counts and trap data from Lower Granite dam, queried by DART (http://www.cbr.washington.edu/dart)
 # Created: 2/23/2016
-# Last Modified: 3/22/2016
+# Last Modified: 6/17/2016
 # Notes: 
 # Window counts: http://www.cbr.washington.edu/dart/query/adult_daily
 # Trap sample rates: http://www.cbr.washington.edu/dart/query/pitadult_valid - Sample Time/Rates
@@ -183,8 +183,10 @@ lgr_trap_summ = lgr_trap %>%
             HNC.PBT = sum(grepl('H$', SRR) & LGDMarkAD=='AI'),
             Hatch.PBT = sum(grepl('H$', SRR) & LGDMarkAD=='AD'),
             NA.PBT = sum(is.na(SRR)),
-            n_invalid = sum(LGDValid != 1)) %>%
+            n_invalid = sum(LGDValid != 1),
+            tot_B_run_sthd = sum(LGDFLmm >= 780 & grepl('W$', SRR))) %>%
   ungroup() %>%
+  mutate(tot_B_run_sthd = ifelse(Species == 'Steelhead', tot_B_run_sthd, NA)) %>%
   mutate(SpawnYear = gsub('^SY', '', SpawnYear),
          SpawnYear = as.integer(SpawnYear),
          SpawnYear = ifelse(!is.na(SpawnYear), SpawnYear, ifelse(Species == 'Chinook', year(Date), ifelse(Species == 'Steelhead' & Date >= ymd(paste0(year(Date), '0701')), year(Date) + 1, year(Date))))) %>%
@@ -246,7 +248,7 @@ lgr_daily %>%
 # transform to weekly summaries
 lgr_weekly = lgr_daily %>%
   group_by(Species, SpawnYear, week_num_org, week_num) %>%
-  summarise_each(funs(sum(., na.rm=T)), win_cnt, trap_fish:NA.PBT) %>%
+  summarise_each(funs(sum(., na.rm=T)), win_cnt, trap_fish:tot_B_run_sthd) %>%
   left_join(lgr_daily %>%
               group_by(Species, SpawnYear, week_num_org, week_num) %>%
               summarise_each(funs(mean(., na.rm=T)), Rate:ActualRateInclusiveTime)) %>%
@@ -576,6 +578,7 @@ jags_data_list = dlply(lgr_weekly, .(Species, SpawnYear), function(x) {
                    'DC.tags' = x %>% mutate(Day_tags = ifelse(day_tags_W > tot_tags_W, tot_tags_W, day_tags_W),
                                             Day_tags = ifelse(!trap_open, NA, Day_tags)) %>%
                      select(Day_tags) %>% as.matrix() %>% as.vector(),
+                   'B.trap' = x %>% select(tot_B_run_sthd) %>% as.matrix() %>% as.vector(),
                    'month.vec' = month_vec,
                    'n.hist.yrs' = ncol(tot.fish),
                    'tot.fish' = tot.fish,
