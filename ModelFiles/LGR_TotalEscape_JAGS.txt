@@ -7,7 +7,7 @@ model {
 		acf[i] ~ dunif(-2,2) # unif prior on temporal correlation @ lag 1 
 	}
 	
-	X.sigma ~ dunif(0,20) # process error in log space
+	X.sigma ~ dunif(0, 20) # process error in log space
 	X.tau <- pow(X.sigma, -2)
 	X.log.all[1] ~ dunif(0,10) # initial state in log space
 	
@@ -21,14 +21,14 @@ model {
 	win.prop.avg ~ dbeta(1,1)	# avg daytime ascension rate
 	win.prop.avg.logit <- logit(win.prop.avg)
 	win.prop.true.logit[1] ~ dnorm(win.prop.avg.logit, win.prop.tau)
-	win.prop.sigma ~ dunif(0,10) # process error on window proportion correction
+	win.prop.sigma ~ dunif(0, 10) # process error on window proportion correction
 	win.prop.tau <- pow(win.prop.sigma, -2)
 	
 	# modeling proportion of fish re-ascending the dam
 	reasc.avg ~ dbeta(1,1)	# avg re-ascension rate
 	reasc.avg.logit <- logit(reasc.avg)
 	reasc.true.logit[1] ~ dnorm(reasc.avg.logit, reasc.tau)
-	reasc.sigma ~ dunif(0,10) # process error on re-ascension proportion correction
+	reasc.sigma ~ dunif(0, 10) # process error on re-ascension proportion correction
 	reasc.tau <- pow(reasc.sigma, -2)
 
 	# modeling proportion of fish that are wild
@@ -37,7 +37,7 @@ model {
 		wnc.avg[j] ~ dbeta(1,1)	# avg proportion of fish that are wild
 		wnc.avg.logit[j] <- logit(wnc.avg[j])
 		wnc.true.logit[1,j] ~ dnorm(wnc.avg.logit[j], wnc.tau[j])
-		wnc.sigma[j] ~ dunif(0,10) # process error on wild proportion
+		wnc.sigma[j] ~ dunif(0, 10) # process error on wild proportion
 		wnc.tau[j] <- pow(wnc.sigma[j], -2)
 	}
 	
